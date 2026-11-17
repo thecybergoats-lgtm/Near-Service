@@ -8,6 +8,9 @@ out/
 # Flutter / Dart
 mobile/.dart_tool/
 mobile/build/
+# Android local build state (gradle.properties IS committed — AndroidX lives there)
+local.properties
+.gradle/
 mobile/.flutter-plugins
 mobile/.flutter-plugins-dependencies
 mobile/.packages
