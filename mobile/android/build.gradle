@@ -19,11 +19,20 @@ subprojects {
     // TIRAMISU) nahi milte aur build fail hota hai. Is liye har Android
     // subproject ka compileSdk zabardasti 34 par set karte hain, jo
     // flutter.compileSdkVersion (34) ke barabar hai.
-    project.afterEvaluate {
-        if (project.hasProperty("android")) {
-            project.android {
-                compileSdk 34
-            }
+    // NOTE: afterEvaluate yahan NAHI chalta — :app pehle evaluate ho chuka
+    // hota hai aur Gradle "Cannot run Project.afterEvaluate when the project
+    // is already evaluated" kehta hai (fb40c2b isi liye fail hui). Is liye
+    // plugins.withId use karte hain: ye usi waqt chalta hai jab Android
+    // plugin apply hota hai, compileSdk padhne se pehle.
+    def subproject = project
+    subproject.plugins.withId("com.android.library") {
+        subproject.android {
+            compileSdk 34
+        }
+    }
+    subproject.plugins.withId("com.android.application") {
+        subproject.android {
+            compileSdk 34
         }
     }
 }
