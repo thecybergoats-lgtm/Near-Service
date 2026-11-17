@@ -44,4 +44,9 @@ EXPOSE 3000
 # for readiness and /health for liveness — see docker-compose.yml.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=5 \
   CMD node -e "fetch('http://localhost:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "backend/dist/main.js"]
+CMD ["sh", "-c", "node backend/dist/scripts/migrate.js && node backend/dist/main.js"]
+# Migrate on boot: the image is self-contained (db/ is copied in above) and
+# hosts like Railway have no "run migrations first" step, so the container
+# applies pending migrations (idempotent, tracked in schema_migrations)
+# before starting the API. If a migration fails the container exits non-zero
+# and the deploy is visibly failed instead of serving an empty database.
