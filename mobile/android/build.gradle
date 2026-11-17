@@ -12,6 +12,22 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+subprojects {
+    // Fix: geolocator_android (aur baqi plugins) ka compileSdk kabhi kabhi
+    // ghalat resolve hota hai — plugin project mein `flutter.compileSdkVersion`
+    // purana SDK de deta hai, jis se API 31/33 ke symbols (VERSION_CODES.S,
+    // TIRAMISU) nahi milte aur build fail hota hai. Is liye har Android
+    // subproject ka compileSdk zabardasti 34 par set karte hain, jo
+    // flutter.compileSdkVersion (34) ke barabar hai.
+    project.afterEvaluate {
+        if (project.hasProperty("android")) {
+            project.android {
+                compileSdk 34
+            }
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }
