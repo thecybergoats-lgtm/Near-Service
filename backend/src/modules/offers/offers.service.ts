@@ -1,4 +1,4 @@
-import { Injectable, Inject, Optional } from '@nestjs/common';
+import { Injectable, Inject, Optional, Logger } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 import { RedisService } from '../../database/redis.service';
 import { RealtimeService } from '../../realtime/realtime.service';
@@ -7,6 +7,7 @@ import { AtomicOfferAcceptor, OfferAlreadyClosedError } from './domain/atomic-ac
 import { withIdempotency } from '../../common/utils/idempotency';
 import { getCommissionBlockThresholdPaisa, isCommissionBlocked, resolveCommissionRate } from '../../common/utils/commission';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export function toOffer(row: Record<string, unknown>) {
   return { id: row.id, request_id: row.request_id, provider_id: row.provider_id, offered_by: row.offered_by, round: Number(row.round), price: Number(row.price), eta_minutes: row.eta_minutes ?? null, status: row.status, expires_at: row.expires_at };
@@ -22,6 +23,7 @@ const OFFER_TTL_MINUTES = 10;
 @Injectable()
 export class OffersService {
   private acceptor = new AtomicOfferAcceptor();
+  private readonly logger = new Logger(OffersService.name);
   // Phase 3: plan-discounted commission. @Optional so direct construction
   // with (db, redis, realtime) in older tests keeps working; when absent
   // the base engine rate is snapshotted unchanged.
@@ -30,7 +32,20 @@ export class OffersService {
     private redis: RedisService,
     private realtime: RealtimeService,
     @Optional() @Inject(SubscriptionsService) private subscriptions?: SubscriptionsService,
+    // Batch 2 push plumbing: @Optional for the same reason — when absent,
+    // offer accept/counter simply sends no push.
+    @Optional() @Inject(NotificationsService) private notifications?: NotificationsService,
   ) {}
+
+  /** Batch 2 (§6b): validate an optional pickup-time commitment. Must be
+   *  a valid ISO 8601 date-time in the future; a past value is 422. */
+  private validateScheduledAt(scheduledAt?: string | null): Date | null {
+    if (!scheduledAt) return null;
+    const at = new Date(scheduledAt);
+    if (Number.isNaN(at.getTime())) throw Errors.unprocessable('INVALID_SCHEDULED_AT', 'scheduled_at must be an ISO 8601 date-time');
+    if (at.getTime() <= Date.now()) throw Errors.unprocessable('SCHEDULED_AT_PAST', 'scheduled_at must be in the future');
+    return at;
+  }
 
   private async providerIdFor(userId: string): Promise<string> {
     const row = (await this.db.query<{ id: string }>(`SELECT id FROM provider_profiles WHERE user_id=$1 AND deleted_at IS NULL`, [userId])).rows[0];
@@ -74,8 +89,14 @@ export class OffersService {
 
   /** Customer accepts one offer — ATOMIC (PRD p.7): Redis lock +
    *  DB transaction (SELECT ... FOR UPDATE) + idempotency key. Exactly one
-   *  job is created; all other offers close; 409 if already closed. */
-  async acceptOffer(offerId: string, customerId: string, idempotencyKey?: string) {
+   *  job is created; all other offers close; 409 if already closed.
+   *
+   *  Batch 2 (§6b): optional scheduled_at commits the provider to a
+   *  pickup date/time. It is stored on the linked service_requests row —
+   *  the same single source of truth the Phase 2 reschedule flow writes —
+   *  and surfaced by GET /jobs/:id and GET /jobs. */
+  async acceptOffer(offerId: string, customerId: string, scheduledAt?: string | null, idempotencyKey?: string) {
+    const scheduled = this.validateScheduledAt(scheduledAt);
     if (idempotencyKey) {
       const cached = await this.redis.get(`idem:offer-accept:${idempotencyKey}`);
       if (cached) return JSON.parse(cached);
@@ -127,15 +148,29 @@ export class OffersService {
           await c.query(`UPDATE offers SET status='accepted' WHERE id=$1`, [offer.id]);
           await c.query(`UPDATE offers SET status='closed' WHERE request_id=$1 AND id<>$2 AND status='pending'`, [req.id, offer.id]);
           await c.query(`UPDATE service_requests SET status='ACCEPTED', updated_at=now() WHERE id=$1`, [req.id]);
+          // Batch 2 (§6b): pickup-time commitment, stored on the request
+          // (same column reschedule writes). Validated up-front in
+          // acceptOffer, so this write cannot fail the transaction.
+          if (scheduled) {
+            await c.query(`UPDATE service_requests SET scheduled_at=$2 WHERE id=$1`, [req.id, scheduled.toISOString()]);
+          }
           await c.query(`INSERT INTO job_events (job_id, from_state, to_state, actor_user_id, actor_role) VALUES ($1,'OFFERS_RECEIVED','ACCEPTED',$2,'customer')`, [job.id, customerId]);
           await c.query(`INSERT INTO chats (job_id, request_id, customer_id, provider_id) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [job.id, req.id, req.customer_id, offer.provider_id]);
           return job;
         }),
       );
-      const result = toJob(job);
+      const result = { ...toJob(job), scheduled_at: scheduled ? scheduled.toISOString() : null };
       if (idempotencyKey) await this.redis.set(`idem:offer-accept:${idempotencyKey}`, JSON.stringify(result), 24 * 3600);
       this.realtime.emitToRoom(`request:${job.request_id}`, 'offer.closed', { request_id: job.request_id, accepted_offer_id: offerId });
       this.realtime.emitToRoom(`job:${job.id}`, 'job.state_changed', { job_id: job.id, from: 'OFFERS_RECEIVED', to: 'ACCEPTED' });
+      // Batch 2 push (best-effort): tell the provider their offer was accepted.
+      try {
+        const providerUser = (await this.db.query<{ user_id: string }>(
+          `SELECT user_id FROM provider_profiles WHERE id=$1`, [String(job.provider_id)])).rows[0];
+        if (providerUser) await this.notifications?.sendToUser(providerUser.user_id, 'offer.accepted', { job_id: job.id, offer_id: offerId });
+      } catch (e) {
+        this.logger.warn(`offer-accepted push failed (best-effort) for job ${job.id}: ${(e as Error).message}`);
+      }
       return result;
     } catch (e) {
       if (e instanceof OfferAlreadyClosedError) throw Errors.conflict('OFFER_ALREADY_CLOSED', 'This offer was already accepted or closed');
@@ -163,6 +198,12 @@ export class OffersService {
     await this.db.query(`UPDATE offers SET status='countered' WHERE id=$1`, [offer.id]);
     const providerUser = (await this.db.query<{ user_id: string }>(`SELECT user_id FROM provider_profiles WHERE id=$1`, [offer.provider_id])).rows[0];
     if (providerUser) this.realtime.emitToUser(providerUser.user_id, 'offer.updated', { offer: counter, round: counter.round });
+    // Batch 2 push (best-effort): tell the provider about the counter.
+    try {
+      if (providerUser) await this.notifications?.sendToUser(providerUser.user_id, 'offer.countered', { offer_id: String(counter.id), request_id: String(offer.request_id) });
+    } catch (e) {
+      this.logger.warn(`offer-countered push failed (best-effort): ${(e as Error).message}`);
+    }
     return toOffer(counter);
   }
 

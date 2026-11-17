@@ -9,8 +9,12 @@ import 'router.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final locale = await loadPersistedLocale();
+  final themeMode = await loadPersistedThemeMode();
   runApp(ProviderScope(
-    overrides: [localeProvider.overrideWith((ref) => locale)],
+    overrides: [
+      localeProvider.overrideWith((ref) => locale),
+      themeModeProvider.overrideWith((ref) => themeMode),
+    ],
     child: const NearServiceApp(),
   ));
 }
@@ -21,11 +25,14 @@ class NearServiceApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localeCode = ref.watch(localeProvider);
+    final themeMode = ref.watch(themeModeProvider);
     final isUrdu = localeCode == 'ur';
     return MaterialApp.router(
       title: 'Near Service',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(isUrdu: isUrdu),
+      darkTheme: buildDarkTheme(isUrdu: isUrdu),
+      themeMode: themeMode,
       routerConfig: buildRouter(),
       locale: isUrdu
           ? const Locale('ur', 'PK')

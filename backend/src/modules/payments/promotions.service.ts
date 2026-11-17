@@ -128,6 +128,31 @@ export class PromotionsService {
     );
   }
 
+  /** Batch 2 (§5): currently-active promos for the mobile home banner.
+   *  Public, read-only. Only promos that are active, in their validity
+   *  window, and (when max_uses is set) not yet exhausted. The promos
+   *  table has no title column, so title echoes the code; discount_text
+   *  is derived from kind/value ("10% off" / "PKR 500 off"). No promo
+   *  code is invented here — every row comes from the promos table. */
+  async listActivePromos(): Promise<{ items: { code: string; title: string; discount_text: string }[] }> {
+    const rows = (await this.db.query<PromoRow>(
+      `SELECT * FROM promos WHERE is_active AND (valid_from IS NULL OR valid_from <= now()) AND (valid_to IS NULL OR valid_to >= now()) ORDER BY valid_from DESC NULLS LAST, code ASC`,
+    )).rows as unknown as PromoRow[];
+    const items: { code: string; title: string; discount_text: string }[] = [];
+    for (const r of rows) {
+      if (r.max_uses !== null && r.max_uses !== undefined) {
+        const used = Number(((await this.db.query<{ cnt: string }>(
+          `SELECT COUNT(*) AS cnt FROM promo_redemptions WHERE promo_id=$1`, [r.id])).rows[0] as unknown as { cnt: string }).cnt);
+        if (used >= r.max_uses) continue;
+      }
+      const discountText = r.kind === 'percent'
+        ? `${Number(r.value)}% off`
+        : r.kind === 'fixed' ? `PKR ${Number(r.value)} off` : '';
+      items.push({ code: r.code, title: r.code, discount_text: discountText });
+    }
+    return { items };
+  }
+
   // ---- Referrals -------------------------------------------------------
   async getReferralInfo(userId: string): Promise<ReferralInfo> {
     const rows = (await this.db.query<{ status: string; credit_paisa: string }>(

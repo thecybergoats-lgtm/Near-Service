@@ -14,6 +14,7 @@ import '../../core/models.dart';
 import '../../core/theme.dart';
 import '../../l10n/app_localizations.dart';
 import '../common/widgets.dart';
+import 'favorites_screen.dart';
 
 /// Customer home (PRD p.22): full-screen map, search bar, category chips,
 /// popular rows, Post-a-request FAB. Falls back to demo providers offline.
@@ -37,10 +38,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// failed (providers still show).
   List<PlaceShop> _places = [];
   bool _placesDegraded = false;
+  /// Active promotions from GET /promotions/active (Batch 2). The
+  /// banner shows ONLY these — never hardcoded promo text. Empty or
+  /// failed load hides the banner entirely.
+  List<PromoItem> _promos = [];
 
   @override
   void initState() {
     super.initState();
+    loadFavoriteIds(ref);
     _load();
   }
 
@@ -70,7 +76,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _offline = true;
     }
     await _loadPlaces();
+    await _loadPromos();
     if (mounted) setState(() => _loading = false);
+  }
+
+  /// Batch 2 promo banner data. Any failure leaves [_promos] empty
+  /// and the banner hidden — a missing promo is never faked.
+  Future<void> _loadPromos() async {
+    try {
+      _promos = await ref.read(apiClientProvider).getActivePromotions();
+    } catch (_) {
+      _promos = [];
+    }
+  }
+
+  IconData _iconForCategory(Category c) {
+    switch (c.slug) {
+      case 'book-binding':
+        return Icons.book;
+      case 'ac-repair':
+        return Icons.ac_unit;
+      case 'electrician':
+        return Icons.electrical_services;
+      case 'plumber':
+        return Icons.plumbing;
+      case 'mobile-repair':
+        return Icons.phone_android;
+      default:
+        return Icons.build;
+    }
   }
 
   /// Real-shop discovery for the selected category (OpenStreetMap, free).
@@ -194,6 +228,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final locale = ref.watch(localeProvider);
     final l = L.of(locale);
+    final scheme = Theme.of(context).colorScheme;
+    final favIds = ref.watch(favoriteIdsProvider);
     return Scaffold(
       body: Stack(
         children: [
@@ -252,7 +288,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       height: kMinTouch,
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: scheme.surface,
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 8)],
                       ),
@@ -266,33 +302,158 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           ),
                           IconButton(
                             icon: const Icon(Icons.mic_none),
-                            onPressed: () => context.push('/customer/search'),
-                            tooltip: 'Voice search (Phase 3)',
+                            onPressed: () => context.push('/customer/search',
+                                extra: {'autoListen': true}),
+                            tooltip: l.t('voice_search_hint'),
                           ),
                         ],
                       ),
                     ),
                   ),
                 ),
-                SizedBox(
-                  height: 40,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                // Batch 2 — promo/deals banner: ONLY real active promos
+                // from GET /promotions/active. Hidden when there are none.
+                if (_promos.isNotEmpty)
+                  TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: 1),
+                    duration: const Duration(milliseconds: 400),
+                    builder: (ctx, value, child) => Opacity(
+                      opacity: value,
+                      child: Transform.translate(
+                        offset: Offset(0, (1 - value) * 8),
+                        child: child,
+                      ),
+                    ),
+                    child: SizedBox(
+                      height: 64,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        itemCount: _promos.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (_, i) {
+                          final promo = _promos[i];
+                          return GestureDetector(
+                            onTap: () => context.push('/customer/request',
+                                extra: _requestExtra()),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFF0F766E),
+                                    Color(0xFFC9A227),
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.local_offer,
+                                      color: Colors.white, size: 20),
+                                  const SizedBox(width: 8),
+                                  Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(promo.title,
+                                          style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 13)),
+                                      Text(
+                                        promo.discountText.isNotEmpty
+                                            ? promo.discountText
+                                            : 'Code: ${promo.code}',
+                                        style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                // Batch 2 — category grid for the 5 launch categories.
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 5,
+                      mainAxisSpacing: 8,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 0.82,
+                    ),
                     itemCount: _categories.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
                     itemBuilder: (_, i) {
                       final c = _categories[i];
                       final selected = _selectedCategory == c.id;
-                      return ChoiceChip(
-                        label: Text(c.displayName(locale)),
-                        selected: selected,
-                        onSelected: (_) {
-                          setState(() {
-                            _selectedCategory = selected ? null : c.id;
-                          });
-                          _load();
-                        },
+                      return TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0, end: 1),
+                        duration: Duration(milliseconds: 250 + i * 60),
+                        builder: (ctx, value, child) => Opacity(
+                          opacity: value,
+                          child: child,
+                        ),
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _selectedCategory = selected ? null : c.id;
+                            });
+                            _load();
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? AppColors.primary
+                                  : scheme.surface,
+                              borderRadius: BorderRadius.circular(14),
+                              boxShadow: const [
+                                BoxShadow(
+                                    color: Colors.black12, blurRadius: 6)
+                              ],
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(_iconForCategory(c),
+                                    size: 22,
+                                    color: selected
+                                        ? Colors.white
+                                        : AppColors.primary),
+                                const SizedBox(height: 4),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 2),
+                                  child: Text(
+                                    c.displayName(locale),
+                                    textAlign: TextAlign.center,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: selected
+                                          ? Colors.white
+                                          : null,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       );
                     },
                   ),
@@ -343,6 +504,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           width: 260,
                           child: ProviderCard(
                             provider: p,
+                            isFavorite: favIds.contains(p.id),
+                            onFavoriteToggle: () =>
+                                toggleFavorite(ref, p.id),
                             onTap: () => context.push('/customer/provider/${p.id}', extra: p),
                             onRequestQuote: () => context.push(
                               '/customer/request',

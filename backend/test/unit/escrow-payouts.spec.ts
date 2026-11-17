@@ -52,6 +52,9 @@ class FakeDb {
       agreed_price: finalPricePkr, final_price: finalPricePkr,
       commission_rate: commissionRate, commission_amount: null,
       state: 'COMPLETED', payment_status: 'unpaid',
+      // Batch 2 (§6a): unconfirmed until the customer confirms (or the
+      // customer release / auto-confirm sweep stamps it).
+      completion_confirmed_at: null, completion_confirmed_by: null,
     });
     return id;
   }
@@ -193,6 +196,21 @@ class FakeDb {
       const j = this.jobs.find((x) => x.id === p[0]);
       if (j) { j.state = 'PAYMENT_SETTLED'; j.payment_status = 'settled'; j.commission_amount = p[1]; }
       return { rows: [] };
+    }
+    // Batch 2 (§6a): customer escrow release stamps the completion
+    // confirmation (COALESCE — a prior confirmation is kept).
+    if (has('UPDATE jobs SET completion_confirmed_at=COALESCE')) {
+      const j = this.jobs.find((x) => x.id === p[0]);
+      if (j && j.state === 'COMPLETED') {
+        j.completion_confirmed_at = j.completion_confirmed_at ?? new Date().toISOString();
+        j.completion_confirmed_by = j.completion_confirmed_by ?? p[1];
+      }
+      return { rows: [] };
+    }
+    // Batch 2 (§6a): admin/auto release gate — is the job confirmed yet?
+    if (has('SELECT completion_confirmed_at FROM jobs WHERE id=$1')) {
+      const j = this.jobs.find((x) => x.id === p[0]);
+      return { rows: [{ completion_confirmed_at: j?.completion_confirmed_at ?? null }] };
     }
     if (has('INSERT INTO job_events')) {
       this.job_events.push({ job_id: p[0], from_state: p[1], to_state: p[2], actor_user_id: p[3], actor_role: p[4], payload: p[5] });
@@ -431,14 +449,37 @@ describe('escrow holds', () => {
     // Move the deadline into the past (hold was created with now + 48h).
     db.escrow_holds.find((h) => h.id === hold.id)!.auto_release_at =
       new Date(Date.now() - 60_000).toISOString();
+    // Batch 2 (§6a): auto-release waits for completion confirmation.
+    db.jobs.find((j) => j.id === jobId)!.completion_confirmed_at = new Date().toISOString();
     const out = await svc.releaseDueHolds();
     expect(out.released).toEqual([hold.id]);
     expect(out.skipped_dispute).toEqual([]);
+    expect(out.skipped_unconfirmed).toEqual([]);
     expect(db.walletOf(providerUserId)!.balance_paisa).toBe(540_000);
     expect(db.escrow_holds.find((h) => h.id === hold.id)!.status).toBe('released');
     // Idempotent: a second sweep releases nothing twice.
     const again = await svc.releaseDueHolds();
     expect(again.released).toEqual([]);
+  });
+
+  it('Batch 2 (§6a): auto-release skips an unconfirmed hold; admin release is 409 until confirmed', async () => {
+    const db = new FakeDb();
+    const svc = makeService(db);
+    const { customerId, providerUserId, jobId } = setupJob(db, 6000);
+    const hold = await svc.createHold(jobId, customerId);
+    db.escrow_holds.find((h) => h.id === hold.id)!.auto_release_at =
+      new Date(Date.now() - 60_000).toISOString();
+    const out = await svc.releaseDueHolds();
+    expect(out.released).toEqual([]);
+    expect(out.skipped_unconfirmed).toEqual([hold.id]);
+    expect(db.escrow_holds.find((h) => h.id === hold.id)!.status).toBe('held');
+    expect(db.walletOf(providerUserId)).toBeUndefined();
+    await expectApiError(svc.releaseHoldAsAdmin(hold.id, 'admin-1'), 'COMPLETION_NOT_CONFIRMED', 409);
+    // Once the customer confirms, the sweep releases it.
+    db.jobs.find((j) => j.id === jobId)!.completion_confirmed_at = new Date().toISOString();
+    const out2 = await svc.releaseDueHolds();
+    expect(out2.released).toEqual([hold.id]);
+    expect(db.walletOf(providerUserId)!.balance_paisa).toBe(540_000);
   });
 
   it('auto-release is blocked when a dispute is open (hold skipped, funds stay parked)', async () => {

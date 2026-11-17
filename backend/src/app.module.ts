@@ -15,6 +15,9 @@ import { OffersModule } from './modules/offers/offers.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { FavouritesModule } from './modules/favourites/favourites.module';
+import { SupportModule } from './modules/support/support.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { TrustModule } from './modules/trust/trust.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { HealthModule } from './modules/health/health.module';
@@ -32,7 +35,7 @@ import { PartnersModule } from './modules/partners/partners.module';
 import { PlacesModule } from './modules/places/places.module';
 
 @Module({
-  imports: [DatabaseModule, RealtimeModule, AuthModule, UsersModule, ProvidersModule, CatalogModule, SearchModule, RequestsModule, OffersModule, JobsModule, MessagingModule, AdminModule, TrustModule, PaymentsModule, HealthModule, AiGatewayModule, RiskModule, SubscriptionsModule, TeamsModule, TendersModule, VerificationModule, EscrowModule, AnalyticsModule, CitiesModule, WarrantyModule, PartnersModule, PlacesModule],
+  imports: [DatabaseModule, RealtimeModule, AuthModule, UsersModule, ProvidersModule, CatalogModule, SearchModule, RequestsModule, OffersModule, JobsModule, MessagingModule, AdminModule, TrustModule, PaymentsModule, HealthModule, AiGatewayModule, RiskModule, SubscriptionsModule, TeamsModule, TendersModule, VerificationModule, EscrowModule, AnalyticsModule, CitiesModule, WarrantyModule, PartnersModule, PlacesModule, FavouritesModule, SupportModule, NotificationsModule],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

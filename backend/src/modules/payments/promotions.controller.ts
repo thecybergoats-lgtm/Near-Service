@@ -2,6 +2,7 @@ import { Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Query } f
 import { IsBoolean, IsDateString, IsEnum, IsInt, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { PromotionsService } from './promotions.service';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/guards/public.decorator';
 import { Roles } from '../../common/guards/roles.decorator';
 import { CursorQueryDto, IsMoney } from '../../common/validation/validators';
 import { uuidParamPipe } from '../../common/validation/uuid.pipe';
@@ -41,6 +42,10 @@ export class UpdatePromoDto {
 @Controller()
 export class PromotionsController {
   constructor(private svc: PromotionsService) {}
+
+  // Batch 2 (§5): public list of currently-active promos for the mobile
+  // home banner. No auth — the banner renders before login.
+  @Public() @Get('promotions/active') activePromos() { return this.svc.listActivePromos(); }
 
   // Validation is side-effect free — no redemption is recorded here.
   @Post('promos/validate') @HttpCode(200) validate(

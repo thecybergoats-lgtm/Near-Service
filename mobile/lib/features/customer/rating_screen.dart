@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/api_client.dart';
 import '../../core/errors.dart';
@@ -31,22 +35,88 @@ class _RatingScreenState extends ConsumerState<RatingScreen> {
   bool _done = false;
   bool _submitting = false;
   String? _error;
+  // Batch 2 — photo reviews (max 3). Photos are picked from the
+  // gallery, uploaded via the signed-URL flow (same as dispute
+  // evidence: request upload URL, PUT bytes, attach the storage key
+  // as photo_keys), then submitted with the review.
+  final List<XFile> _photos = [];
+  bool _uploadingPhotos = false;
+  String? _photoNote;
 
   static const _allTags = [
     'On time', 'Good work', 'Fair price', 'Polite', 'Clean work', 'Late', 'Price changed',
   ];
 
+  Future<void> _pickPhoto() async {
+    if (_photos.length >= 3) {
+      setState(() => _photoNote = 'Maximum 3 photos.');
+      return;
+    }
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1280,
+        imageQuality: 80,
+      );
+      // Null = the user cancelled the picker — not an error.
+      if (picked == null) return;
+      setState(() {
+        _photos.add(picked);
+        _photoNote = null;
+      });
+    } on PlatformException {
+      // Permission denied (or picker unavailable): plain message,
+      // the review still works without a photo.
+      setState(() => _photoNote =
+          'Photo access is off — allow photo access in settings, or submit the review without a photo.');
+    } catch (_) {
+      setState(() => _photoNote = 'Could not pick that photo. Try another one.');
+    }
+  }
+
+  /// Uploads the picked photos and returns their storage keys.
+  /// A failed upload-request (endpoint not live yet) or a failed PUT
+  /// skips that photo instead of failing the review.
+  Future<List<String>> _uploadPhotos() async {
+    final api = ref.read(apiClientProvider);
+    final keys = <String>[];
+    for (final photo in _photos) {
+      try {
+        final up = await api.requestReviewPhotoUpload(widget.jobId);
+        if (up.uploadUrl.isEmpty || up.storageKey.isEmpty) continue;
+        final bytes = await File(photo.path).readAsBytes();
+        final ok = await api.uploadPhotoBytes(up.uploadUrl, bytes);
+        if (ok) keys.add(up.storageKey);
+      } catch (_) {
+        // Skip this photo; the review goes through without it.
+      }
+    }
+    return keys;
+  }
+
   Future<void> _submit() async {
     setState(() {
       _submitting = true;
       _error = null;
+      _photoNote = null;
     });
     try {
+      List<String> photoKeys = const [];
+      if (_photos.isNotEmpty) {
+        setState(() => _uploadingPhotos = true);
+        photoKeys = await _uploadPhotos();
+        if (photoKeys.length < _photos.length && mounted) {
+          setState(() => _photoNote =
+              'Some photos could not be uploaded — the review is submitted with the ones that did.');
+        }
+        if (mounted) setState(() => _uploadingPhotos = false);
+      }
       await ref.read(apiClientProvider).submitReview(
             widget.jobId,
             _stars,
             _tags.toList(),
             _commentController.text.trim(),
+            photoKeys: photoKeys,
           );
       setState(() => _done = true);
     } on ApiException catch (e) {
@@ -131,6 +201,70 @@ class _RatingScreenState extends ConsumerState<RatingScreen> {
               maxLines: 3,
               decoration: const InputDecoration(hintText: 'Tell others about the work (optional)'),
             ),
+            const SizedBox(height: 16),
+            const Text('Photos of the work (optional, max 3)',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                ..._photos.map((p) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.file(
+                              File(p.path),
+                              width: 72,
+                              height: 72,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            child: GestureDetector(
+                              onTap: () => setState(() => _photos.remove(p)),
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close,
+                                    size: 18, color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )),
+                if (_photos.length < 3)
+                  OutlinedButton.icon(
+                    onPressed: _submitting ? null : _pickPhoto,
+                    icon: const Icon(Icons.add_a_photo_outlined),
+                    label: const Text('Add photo'),
+                  ),
+              ],
+            ),
+            if (_photoNote != null) ...[
+              const SizedBox(height: 8),
+              Text(_photoNote!,
+                  style: const TextStyle(color: Colors.grey, fontSize: 13)),
+            ],
+            if (_uploadingPhotos) ...[
+              const SizedBox(height: 8),
+              const Row(
+                children: [
+                  SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                  SizedBox(width: 8),
+                  Text('Uploading photos…',
+                      style: TextStyle(fontSize: 13)),
+                ],
+              ),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!, style: const TextStyle(color: Colors.red)),

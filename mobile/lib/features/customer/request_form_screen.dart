@@ -29,10 +29,19 @@ import '../common/widgets.dart';
 /// before any API call, so a slug is never sent as `category_id` —
 /// the request is sent with `category_slug` instead (PRD v1.1).
 class RequestFormScreen extends ConsumerStatefulWidget {
-  const RequestFormScreen({super.key, this.categoryId, this.categorySlug});
+  const RequestFormScreen(
+      {super.key,
+      this.categoryId,
+      this.categorySlug,
+      this.initialOffer,
+      this.initialDescription});
 
   final String? categoryId;
   final String? categorySlug;
+  /// Batch 2 "Book again": pre-fill the offer (PKR) from the past job.
+  final int? initialOffer;
+  /// Batch 2 "Book again": pre-fill the description from the past job.
+  final String? initialDescription;
 
   @override
   ConsumerState<RequestFormScreen> createState() => _RequestFormScreenState();
@@ -117,6 +126,14 @@ class _RequestFormScreenState extends ConsumerState<RequestFormScreen> {
   @override
   void initState() {
     super.initState();
+    // Batch 2 "Book again" pre-fill (same provider/category/price).
+    if (widget.initialOffer != null && widget.initialOffer! > 0) {
+      _offerController.text = widget.initialOffer.toString();
+    }
+    if (widget.initialDescription != null &&
+        widget.initialDescription!.isNotEmpty) {
+      _descController.text = widget.initialDescription!;
+    }
     _resolveCategory();
   }
 
@@ -492,6 +509,29 @@ class _RequestFormScreenState extends ConsumerState<RequestFormScreen> {
             ),
             const SizedBox(height: 12),
             if (_fairRange != null) FairPriceMeter(range: _fairRange!, offer: _offer),
+            // Batch 2 (J2) — payment timing, next to the FairPriceMeter.
+            // The form itself has no payment-method field (the method
+            // is chosen at payment time), so both timings are shown
+            // plainly rather than inventing a method choice here.
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F766E).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Payment timing',
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                  SizedBox(height: 4),
+                  Text('Cash — Payment: kaam ke baad'),
+                  Text('Wallet — Wallet: pehle escrow mein, kaam ke baad provider ko'),
+                ],
+              ),
+            ),
           ],
           const SizedBox(height: 16),
           TextField(

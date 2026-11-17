@@ -218,6 +218,9 @@ function seedJob(db: FakeDb, id: string, customerId: string, finalPricePkr: numb
     id, request_id: randomUUID(), offer_id: randomUUID(), customer_id: customerId,
     provider_id: PROVIDER_PROFILE, agreed_price: finalPricePkr, final_price: finalPricePkr,
     commission_rate: 0.1, commission_amount: null, state, payment_method: 'cash', payment_status: 'unpaid',
+    // Batch 2 (§6a): seeded jobs are already customer-confirmed, so the
+    // wallet-payment tests exercise settlement, not the confirm gate.
+    completion_confirmed_at: new Date().toISOString(), completion_confirmed_by: customerId,
   };
   db.jobs.push(job);
   return job;
@@ -324,6 +327,23 @@ describe('wallet ledger (top-up → pay)', () => {
     await expectApiError(wallet.payWithWallet('job-0001', CUSTOMER), 409, 'NOT_COMPLETED');
     seedJob(db, 'job-0002', CUSTOMER, 1000);
     await expectApiError(wallet.payWithWallet('job-0002', PROVIDER_USER), 403, 'FORBIDDEN');
+  });
+
+  it('Batch 2 §6a: wallet payment is blocked until the customer confirms completion', async () => {
+    const { db, wallet } = makeWorld();
+    await topUp(wallet, CUSTOMER, 2000);
+    const job = seedJob(db, 'job-0001', CUSTOMER, 1000);
+    (job as { completion_confirmed_at: string | null; completion_confirmed_by: string | null }).completion_confirmed_at = null;
+    (job as { completion_confirmed_at: string | null; completion_confirmed_by: string | null }).completion_confirmed_by = null;
+    await expectApiError(wallet.payWithWallet('job-0001', CUSTOMER), 409, 'COMPLETION_NOT_CONFIRMED');
+    // No payment moved: only the 2 top-up legs exist.
+    expect(db.ledger_entries).toHaveLength(2);
+    expect(db.ledger_entries.every((e) => e.job_id === null)).toBe(true);
+    expect(db.jobs[0].state).toBe('COMPLETED');
+    job.completion_confirmed_at = new Date().toISOString();
+    job.completion_confirmed_by = CUSTOMER;
+    const res = await wallet.payWithWallet('job-0001', CUSTOMER);
+    expect(res.job.state).toBe('PAYMENT_SETTLED');
   });
 
   it('FIRSTJOB10: 10% discount absorbed by the platform, provider still gets full price − commission', async () => {

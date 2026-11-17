@@ -84,9 +84,87 @@ class _OffersScreenState extends ConsumerState<OffersScreen> {
     return list;
   }
 
+  /// Batch 2 (J3): accepting an offer must include the pickup-time
+  /// commitment — today/tomorrow + time, sent as `scheduled_at`.
+  /// The customer can still accept without a time, but the picker is
+  /// always shown first.
   Future<void> _accept(Offer offer) async {
+    DateTime day = DateTime.now().add(const Duration(days: 1));
+    TimeOfDay time = const TimeOfDay(hour: 10, minute: 0);
+    var dayLabel = 'Tomorrow';
+    final picked = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('When should ${offer.providerName} come?',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 16)),
+              const SizedBox(height: 4),
+              const Text(
+                'Pick a day and time — this is the provider’s committed arrival time and it shows on the job tracking screen.',
+                style: TextStyle(color: Colors.grey, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'today', label: Text('Today')),
+                  ButtonSegment(value: 'tomorrow', label: Text('Tomorrow')),
+                ],
+                selected: {dayLabel.toLowerCase()},
+                onSelectionChanged: (s) => setSheetState(() {
+                  dayLabel = s.first == 'today' ? 'Today' : 'Tomorrow';
+                  final now = DateTime.now();
+                  day = s.first == 'today'
+                      ? DateTime(now.year, now.month, now.day)
+                      : DateTime(now.year, now.month, now.day + 1);
+                }),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final t = await showTimePicker(
+                      context: ctx, initialTime: time);
+                  if (t != null) setSheetState(() => time = t);
+                },
+                icon: const Icon(Icons.access_time),
+                label: Text('Time: ${time.format(ctx)}'),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: Text('Confirm $dayLabel, ${time.format(ctx)} & accept'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Accept without a time'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null) return; // dismissed — do not accept.
+    final scheduledAt = picked
+        ? DateTime(day.year, day.month, day.day, time.hour, time.minute)
+        : null;
     try {
-      final job = await ref.read(apiClientProvider).acceptOffer(offer.id);
+      final job = await ref.read(apiClientProvider).acceptOffer(
+            offer.id,
+            scheduledAt: scheduledAt,
+          );
       if (mounted) context.push('/customer/job/${job.id}', extra: job);
     } on ApiException catch (e) {
       if (mounted) {

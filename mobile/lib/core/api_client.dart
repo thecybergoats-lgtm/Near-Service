@@ -528,9 +528,17 @@ class ApiClient implements PartnerApi {
     return Offer.fromJson(_decode(res) as Map<String, dynamic>);
   }
 
-  Future<Job> acceptOffer(String offerId) async {
+  /// Accepts an offer. Batch 2 (J3): the customer picks the pickup
+  /// time (today/tomorrow + time) and it is sent as `scheduled_at`
+  /// — the provider's committed arrival time.
+  Future<Job> acceptOffer(String offerId, {DateTime? scheduledAt}) async {
     final res = await _send(
-      (h) => _http.post(_u('/offers/$offerId/accept'), headers: h, body: '{}'),
+      (h) => _http.post(_u('/offers/$offerId/accept'),
+          headers: h,
+          body: jsonEncode({
+            if (scheduledAt != null)
+              'scheduled_at': scheduledAt.toIso8601String(),
+          })),
       mutating: true,
     );
     if (res.statusCode != 200 && res.statusCode != 201) _throwError(res);
@@ -603,14 +611,8 @@ class ApiClient implements PartnerApi {
     return Job.fromJson(_decode(res) as Map<String, dynamic>);
   }
 
-  Future<void> submitReview(String jobId, int stars, List<String> tags, String comment) async {
-    final res = await _send(
-      (h) => _http.post(_u('/jobs/$jobId/reviews'),
-          headers: h,
-          body: jsonEncode({'stars': stars, 'tags': tags, 'comment': comment})),
-      mutating: true,
-    );
-    if (res.statusCode != 200 && res.statusCode != 201) _throwError(res);
+  Future<void> submitReview(String jobId, int stars, List<String> tags, String comment, {List<String> photoKeys = const []}) async {
+    await submitReviewWithPhotos(jobId, stars, tags, comment, photoKeys: photoKeys);
   }
 
   Future<void> sendSos(String jobId, double lat, double lng) async {
@@ -1950,6 +1952,202 @@ class ApiClient implements PartnerApi {
     if (res.statusCode != 200) _throwError(res);
     return _decode(res) as Map<String, dynamic>;
   }
+  // ---- Batch 2 ------------------------------------------------------------
+  // Favourites, photo reviews, Live Support, push preferences,
+  // completion confirmation, no-show reports, active promotions.
+  // These endpoints are the Batch 2 contract; at the time of writing
+  // the backend agent was still adding them, so each call follows the
+  // contract exactly as specified and degrades gracefully (callers
+  // show a plain message) if the backend answers 404.
+
+  /// POST /providers/:id/favourite.
+  Future<void> addFavourite(String providerId) async {
+    final res = await _send(
+      (h) => _http.post(_u('/providers/$providerId/favourite'), headers: h, body: '{}'),
+      mutating: true,
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) _throwError(res);
+  }
+
+  /// DELETE /providers/:id/favourite.
+  Future<void> removeFavourite(String providerId) async {
+    final res = await _send(
+      (h) => _http.delete(_u('/providers/$providerId/favourite'), headers: h),
+      mutating: true,
+    );
+    if (res.statusCode != 200 && res.statusCode != 204) _throwError(res);
+  }
+
+  /// GET /favourites — {items: [provider list items], next_cursor}.
+  /// NOTE: the backend's favourite items are a SLIM shape
+  /// {provider_id, display_name, provider_type, rating_bayes,
+  /// jobs_completed, favourited_at} — not the full provider shape —
+  /// so they are parsed with [ServiceProvider.fromFavouriteJson].
+  Future<({List<ServiceProvider> items, String? nextCursor})> listFavourites({String? cursor}) async {
+    final query = <String, String>{
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+    };
+    final res = await _send((h) => _http.get(_u('/favourites', query), headers: h));
+    if (res.statusCode != 200) _throwError(res);
+    final body = _decode(res);
+    return (
+      items: parsePage(body, ServiceProvider.fromFavouriteJson),
+      nextCursor: parseNextCursor(body),
+    );
+  }
+
+  /// GET /promotions/active (public) — {items: [{code, title,
+  /// discount_text}]}. The home banner shows ONLY these items.
+  Future<List<PromoItem>> getActivePromotions() async {
+    final res = await _send((h) => _http.get(_u('/promotions/active'), headers: h));
+    if (res.statusCode != 200) _throwError(res);
+    final body = _decode(res);
+    final list = (body is Map ? body['items'] ?? [] : []) as List;
+    return list.map((e) => PromoItem.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// GET /providers/:id/reviews — public, paginated {items, next_cursor}.
+  /// Each review carries `photos: string[]` (Batch 2).
+  Future<({List<ProviderReview> items, String? nextCursor})> getProviderReviews(String providerId, {String? cursor}) async {
+    final query = <String, String>{
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+    };
+    final res = await _send((h) => _http.get(_u('/providers/$providerId/reviews', query), headers: h));
+    if (res.statusCode != 200) _throwError(res);
+    final body = _decode(res);
+    return (
+      items: parsePage(body, ProviderReview.fromJson),
+      nextCursor: parseNextCursor(body),
+    );
+  }
+
+  /// Signed-URL upload for a review photo, mirroring the dispute
+  /// evidence flow (POST /disputes/:id/evidence/upload-request ->
+  /// {upload_url, storage_key}, PUT bytes, attach the key).
+  /// Contract assumed: POST /jobs/:id/reviews/upload-request returns
+  /// the same {upload_url, storage_key} shape. If the backend has not
+  /// added it yet, this throws and the rating screen submits the
+  /// review without photos instead of failing the review.
+  Future<({String uploadUrl, String storageKey})> requestReviewPhotoUpload(String jobId) async {
+    final res = await _send(
+      (h) => _http.post(_u('/jobs/$jobId/reviews/upload-request'), headers: h, body: '{}'),
+      mutating: true,
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) _throwError(res);
+    final body = _decode(res) as Map<String, dynamic>;
+    return (
+      uploadUrl: (body['upload_url'] ?? '').toString(),
+      storageKey: (body['storage_key'] ?? '').toString(),
+    );
+  }
+
+  /// PUTs raw photo bytes to a signed upload URL (same flow as
+  /// provider documents / dispute evidence). Returns true on 2xx.
+  Future<bool> uploadPhotoBytes(String uploadUrl, List<int> bytes, {String contentType = 'image/jpeg'}) async {
+    try {
+      final res = await _http.put(
+        Uri.parse(uploadUrl),
+        headers: {'Content-Type': contentType},
+        body: bytes,
+      );
+      return res.statusCode >= 200 && res.statusCode < 300;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// POST /jobs/:id/reviews — Batch 2 adds optional photo_keys (max 3).
+  Future<void> submitReviewWithPhotos(String jobId, int stars, List<String> tags, String comment, {List<String> photoKeys = const []}) async {
+    final res = await _send(
+      (h) => _http.post(_u('/jobs/$jobId/reviews'),
+          headers: h,
+          body: jsonEncode({
+            'stars': stars,
+            'tags': tags,
+            'comment': comment,
+            if (photoKeys.isNotEmpty) 'photo_keys': photoKeys.take(3).toList(),
+          })),
+      mutating: true,
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) _throwError(res);
+  }
+
+  /// POST /support/threads {subject, message}.
+  Future<SupportThread> createSupportThread({required String subject, required String message}) async {
+    final res = await _send(
+      (h) => _http.post(_u('/support/threads'),
+          headers: h, body: jsonEncode({'subject': subject, 'message': message})),
+      mutating: true,
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) _throwError(res);
+    final body = _decode(res) as Map<String, dynamic>;
+    final threadJson = (body['thread'] as Map<String, dynamic>?) ?? body;
+    return SupportThread.fromJson(threadJson);
+  }
+
+  /// GET /support/threads.
+  Future<List<SupportThread>> listSupportThreads() async {
+    final res = await _send((h) => _http.get(_u('/support/threads'), headers: h));
+    if (res.statusCode != 200) _throwError(res);
+    return parsePage(_decode(res), SupportThread.fromJson);
+  }
+
+  /// GET /support/threads/:id/messages.
+  Future<List<SupportMessage>> getSupportMessages(String threadId) async {
+    final res = await _send((h) => _http.get(_u('/support/threads/$threadId/messages'), headers: h));
+    if (res.statusCode != 200) _throwError(res);
+    return parsePage(_decode(res), SupportMessage.fromJson);
+  }
+
+  /// POST /support/threads/:id/messages {body} — the backend DTO is
+  /// SendSupportMessageDto {body} (not `message`).
+  Future<SupportMessage> sendSupportMessage(String threadId, String message) async {
+    final res = await _send(
+      (h) => _http.post(_u('/support/threads/$threadId/messages'),
+          headers: h, body: jsonEncode({'body': message})),
+      mutating: true,
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) _throwError(res);
+    return SupportMessage.fromJson(_decode(res) as Map<String, dynamic>);
+  }
+
+  /// PATCH /users/me/notification-preferences {push_enabled}.
+  /// NOTE: this only syncs the preference. Real push delivery needs
+  /// Firebase (see docs/push-notifications-setup.md) — there is no
+  /// firebase_messaging in this app and no FCM token is invented here.
+  Future<void> updateNotificationPreferences({required bool pushEnabled}) async {
+    final res = await _send(
+      (h) => _http.patch(_u('/users/me/notification-preferences'),
+          headers: h, body: jsonEncode({'push_enabled': pushEnabled})),
+      mutating: true,
+    );
+    if (res.statusCode != 200) _throwError(res);
+  }
+
+  /// POST /jobs/:id/confirm-completion (customer-only). The job's
+  /// payment settles only after this call.
+  Future<Job> confirmCompletion(String jobId) async {
+    final res = await _send(
+      (h) => _http.post(_u('/jobs/$jobId/confirm-completion'), headers: h, body: '{}'),
+      mutating: true,
+    );
+    if (res.statusCode != 200) _throwError(res);
+    return Job.fromJson(_decode(res) as Map<String, dynamic>);
+  }
+
+  /// POST /jobs/:id/report-no-show (customer-only, after scheduled_at).
+  Future<void> reportNoShow(String jobId) async {
+    final res = await _send(
+      (h) => _http.post(_u('/jobs/$jobId/report-no-show'), headers: h, body: '{}'),
+      mutating: true,
+    );
+    if (res.statusCode != 200 && res.statusCode != 201) _throwError(res);
+  }
+
+  /// A review photo value is only a fetchable image when the backend
+  /// returned a full http(s) URL; a bare storage key is not.
+  static String? photoDisplayUrl(String photo) =>
+      photo.startsWith('http://') || photo.startsWith('https://') ? photo : null;
 }
 
 final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());

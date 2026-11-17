@@ -4,8 +4,9 @@ import { DatabaseService } from '../../database/database.service';
 import { RedisService } from '../../database/redis.service';
 import { RealtimeService } from '../../realtime/realtime.service';
 import { WarrantyService } from '../warranty/warranty.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { Errors } from '../../common/errors/api-error';
-import { isLegalTransition, JobState } from '../../common/utils/job-state-machine';
+import { isLegalTransition, JobState, TERMINAL_STATES } from '../../common/utils/job-state-machine';
 import { commissionPaisa, pkrToPaisa } from '../../common/utils/money';
 import { bayesianRating } from '../../common/utils/ranking';
 import { ensureWallet } from '../../common/utils/wallet';
@@ -24,6 +25,9 @@ export class JobsService {
     // this service directly with (db, redis, realtime) keep working.
     // When present, the warranty fee is collected at settlement.
     @Optional() @Inject(WarrantyService) private warranty?: WarrantyService,
+    // Batch 2 push plumbing: @Optional for the same reason — when absent,
+    // job completion simply sends no push.
+    @Optional() @Inject(NotificationsService) private notifications?: NotificationsService,
   ) {}
 
   private async logEvent(client: { query: (t: string, p?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> }, jobId: string, from: string | null, to: string, actorId: string, role: string, payload: Record<string, unknown> = {}) {
@@ -37,6 +41,13 @@ export class JobsService {
     if (!job) throw Errors.notFound('Job');
     const from = job.state as JobState;
     const role = userId === job.customer_id ? 'customer' : 'provider';
+    // Batch 2 (§6a): marking work done is provider-only. A customer
+    // reaching COMPLETED through the generic transition is the same act as
+    // POST /jobs/:id/complete, so it is blocked here too — the customer
+    // confirms afterwards via POST /jobs/:id/confirm-completion.
+    if (to === 'COMPLETED' && userId === job.customer_id) {
+      throw Errors.forbidden('Only the provider can mark work done — the customer confirms completion afterwards');
+    }
     if (!isLegalTransition(from, to)) {
       // Illegal transitions are still written to job_events (PRD p.8).
       await this.db.query(`INSERT INTO job_events (job_id, from_state, to_state, actor_user_id, actor_role, payload) VALUES ($1,$2,$3,$4,$5,$6)`,
@@ -86,7 +97,138 @@ export class JobsService {
     return updated;
   }
 
-  async complete(jobId: string, userId: string) { return this.transition(jobId, userId, 'COMPLETED'); }
+  /** Batch 2 (§6a): marking work done is PROVIDER-ONLY. A customer calling
+   *  it gets 403 (this closes the verified gap where either party could
+   *  complete a job). On success the customer gets a best-effort push
+   *  asking them to confirm completion. */
+  async complete(jobId: string, userId: string) {
+    const job = (await this.db.query<{ state: string; customer_id: string; provider_id: string }>(
+      `SELECT j.state, j.customer_id, p.user_id AS provider_user_id FROM jobs j JOIN provider_profiles p ON p.id=j.provider_id WHERE j.id=$1`, [jobId])).rows[0] as unknown as { state: string; customer_id: string; provider_user_id: string } | undefined;
+    if (!job) throw Errors.notFound('Job');
+    if (userId === job.customer_id) throw Errors.forbidden('Only the provider can mark work done — the customer confirms completion afterwards');
+    if (userId !== job.provider_user_id) throw Errors.forbidden('Only the job provider can mark work done');
+    const done = await this.transition(jobId, userId, 'COMPLETED');
+    try {
+      await this.notifications?.sendToUser(job.customer_id, 'job.completed', { job_id: jobId });
+    } catch (e) {
+      this.logger.warn(`completion push failed (best-effort) for job ${jobId}: ${(e as Error).message}`);
+    }
+    return done;
+  }
+
+  /** Batch 2 (§6a): the CUSTOMER confirms the completed work. Provider ->
+   *  403, non-party -> 403, double-confirm -> 409 ALREADY_CONFIRMED,
+   *  confirming a job that is not COMPLETED -> 409 NOT_COMPLETED.
+   *  Confirmation is stored as jobs.completion_confirmed_at (+
+   *  completion_confirmed_by) AND as a job_events row (COMPLETED ->
+   *  COMPLETED, actor customer, payload event 'completion_confirmed') —
+   *  the same dual recording the RATED transition uses (column state +
+   *  job_events row). Payment (cash confirmPayment, wallet pay, escrow
+   *  release) is blocked until this flag is set. */
+  async confirmCompletion(jobId: string, userId: string) {
+    const job = (await this.db.query(
+      `SELECT j.*, p.user_id AS provider_user_id FROM jobs j JOIN provider_profiles p ON p.id=j.provider_id WHERE j.id=$1`, [jobId])).rows[0] as unknown as Record<string, unknown> | undefined;
+    if (!job) throw Errors.notFound('Job');
+    if (userId === job.provider_user_id) throw Errors.forbidden('Only the customer can confirm completion');
+    if (userId !== job.customer_id) throw Errors.forbidden('Only the job customer can confirm completion');
+    if (job.completion_confirmed_at) throw Errors.conflict('ALREADY_CONFIRMED', 'Completion was already confirmed for this job');
+    if (job.state !== 'COMPLETED') throw Errors.conflict('NOT_COMPLETED', 'Completion can only be confirmed while the job is COMPLETED');
+    const updated = (await this.db.query(
+      `UPDATE jobs SET completion_confirmed_at=now(), completion_confirmed_by=$2, updated_at=now()
+        WHERE id=$1 AND state='COMPLETED' AND completion_confirmed_at IS NULL RETURNING *`,
+      [jobId, userId])).rows[0] as unknown as Record<string, unknown> | undefined;
+    if (!updated) throw Errors.conflict('ALREADY_CONFIRMED', 'Completion was already confirmed for this job');
+    await this.logEvent(this.db as unknown as { query: (t: string, p?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
+      jobId, 'COMPLETED', 'COMPLETED', userId, 'customer', { event: 'completion_confirmed' });
+    return {
+      ...toJob(updated),
+      completion_confirmed_at: updated.completion_confirmed_at,
+      completion_confirmed_by: updated.completion_confirmed_by,
+    };
+  }
+
+  /** Completion-confirm window (Batch 2 §6a): admin-configurable via
+   *  feature_flags key `completion_confirm_window_hours` (integer hours),
+   *  default 48. Same read pattern as getReviewWindowDays — a bad/missing
+   *  flag falls back to 48, never fails the request. */
+  static readonly COMPLETION_CONFIRM_WINDOW_HOURS_DEFAULT = 48;
+  async getCompletionConfirmWindowHours(): Promise<number> {
+    try {
+      const row = (await this.db.query<{ config: { value_hours?: number } }>(
+        `SELECT config FROM feature_flags WHERE key='completion_confirm_window_hours'`, [])).rows[0];
+      const h = Number(row?.config?.value_hours);
+      if (Number.isInteger(h) && h >= 1 && h <= 720) return h;
+    } catch { /* fall through to the default */ }
+    return JobsService.COMPLETION_CONFIRM_WINDOW_HOURS_DEFAULT;
+  }
+
+  /** Auto-confirm sweep (Batch 2 §6a): every COMPLETED job whose
+   *  completed_at is older than the confirm window and still unconfirmed
+   *  is confirmed by 'system' (job_events reason
+   *  'completion_auto_confirmed'). Idempotent — a re-run confirms nothing
+   *  twice. Mirrors closeReviewWindows: `now` is a parameter so tests can
+   *  pass a fake clock; the admin endpoint passes the real current time.
+   *  No in-process scheduler exists — an external scheduler must call
+   *  POST /admin/jobs/auto-confirm-completions. */
+  async autoConfirmCompletions(now: Date = new Date()): Promise<{ confirmed_count: number; confirmed_job_ids: string[]; completion_confirm_window_hours: number; checked_at: string }> {
+    const windowHours = await this.getCompletionConfirmWindowHours();
+    const cutoff = new Date(now.getTime() - windowHours * 3600000);
+    const candidates = (await this.db.query<{ id: string }>(
+      `SELECT j.id FROM jobs j WHERE j.state='COMPLETED' AND j.completion_confirmed_at IS NULL
+         AND COALESCE(j.completed_at, j.updated_at) < $1`,
+      [cutoff.toISOString()])).rows;
+    const confirmed: string[] = [];
+    for (const c of candidates) {
+      const updated = (await this.db.query(
+        `UPDATE jobs SET completion_confirmed_at=now(), updated_at=now()
+          WHERE id=$1 AND state='COMPLETED' AND completion_confirmed_at IS NULL RETURNING id`,
+        [String(c.id)])).rows[0];
+      if (!updated) continue;
+      await this.logEvent(this.db as unknown as { query: (t: string, p?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
+        String(c.id), 'COMPLETED', 'COMPLETED', null as unknown as string, 'system',
+        { reason: 'completion_auto_confirmed', completion_confirm_window_hours: windowHours });
+      confirmed.push(String(c.id));
+    }
+    return { confirmed_count: confirmed.length, confirmed_job_ids: confirmed, completion_confirm_window_hours: windowHours, checked_at: now.toISOString() };
+  }
+
+  /** Batch 2 (§6b): the customer reports that the provider did not show up
+   *  at the committed pickup time. Only when now > scheduled_at and the job
+   *  is not COMPLETED (and not terminal); increments
+   *  provider_profiles.no_show_count, writes a 'no_show' risk_events row
+   *  (weight 12 — the risk engine scores it on the next recompute) and a
+   *  job_events row with reason 'provider_no_show'. The job state does NOT
+   *  change here — the customer can then cancel it via the normal
+   *  transition, which is what "allows the customer to cancel afterwards"
+   *  means. */
+  async reportNoShow(jobId: string, userId: string, now: Date = new Date()) {
+    const job = (await this.db.query(
+      `SELECT j.*, r.scheduled_at, p.user_id AS provider_user_id FROM jobs j
+         JOIN provider_profiles p ON p.id=j.provider_id
+         LEFT JOIN service_requests r ON r.id=j.request_id WHERE j.id=$1`, [jobId])).rows[0] as unknown as Record<string, unknown> | undefined;
+    if (!job) throw Errors.notFound('Job');
+    if (userId !== job.customer_id) throw Errors.forbidden('Only the job customer can report a no-show');
+    if (!job.scheduled_at) throw Errors.conflict('NO_SCHEDULED_TIME', 'No pickup time was committed for this job — there is nothing to miss');
+    if (job.state === 'COMPLETED') throw Errors.conflict('JOB_ALREADY_COMPLETED', 'The job is already COMPLETED — a no-show cannot be reported');
+    if ((TERMINAL_STATES as string[]).includes(String(job.state))) throw Errors.conflict('JOB_TERMINAL', `Job is ${job.state} and a no-show cannot be reported`);
+    if (now.getTime() <= new Date(String(job.scheduled_at)).getTime()) {
+      throw Errors.conflict('TOO_EARLY', 'The scheduled pickup time has not passed yet');
+    }
+    const out = await this.db.withTransaction(async (c) => {
+      const client = c as unknown as { query: (t: string, p?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> };
+      const prof = (await c.query(
+        `UPDATE provider_profiles SET no_show_count=no_show_count+1 WHERE id=$1 RETURNING no_show_count`,
+        [String(job.provider_id)])).rows[0] as unknown as { no_show_count: string };
+      await c.query(
+        `INSERT INTO risk_events (user_id, job_id, signal, score_delta, detail, source)
+         VALUES ($1,$2,'no_show',12,$3,'system')`,
+        [String(job.provider_user_id), jobId, JSON.stringify({ scheduled_at: String(job.scheduled_at), reported_by: userId })]);
+      await this.logEvent(client, jobId, String(job.state), String(job.state), userId, 'customer',
+        { reason: 'provider_no_show', scheduled_at: String(job.scheduled_at), no_show_count: Number(prof.no_show_count) });
+      return { no_show_count: Number(prof.no_show_count) };
+    });
+    return { job_id: jobId, provider_id: String(job.provider_id), no_show_count: out.no_show_count, scheduled_at: String(job.scheduled_at), reported_at: now.toISOString() };
+  }
 
   /** Cash confirmation: BOTH sides must confirm. On the second confirmation
    *  the job settles: payment row + double-entry ledger + provider wallet
@@ -99,6 +241,10 @@ export class JobsService {
       `SELECT j.*, p.user_id AS provider_user_id FROM jobs j JOIN provider_profiles p ON p.id=j.provider_id WHERE j.id=$1`, [jobId])).rows[0] as unknown as Record<string, unknown>;
     if (!job) throw Errors.notFound('Job');
     if (job.state !== 'COMPLETED') throw Errors.conflict('NOT_COMPLETED', 'Payment can only be confirmed after COMPLETED');
+    // Batch 2 (§6a): no payment before the customer confirms completion —
+    // cash, wallet and escrow all wait for completion_confirmed_at (or the
+    // auto-confirm sweep). Disputes stay available before settlement.
+    if (!job.completion_confirmed_at) throw Errors.conflict('COMPLETION_NOT_CONFIRMED', 'The customer must confirm completion before payment can be confirmed');
     const isCustomer = userId === job.customer_id;
     const isProvider = userId === job.provider_user_id;
     if (!isCustomer && !isProvider) throw Errors.forbidden('Only the job parties can confirm payment');
@@ -235,6 +381,25 @@ export class JobsService {
     return { closed_count: closed.length, closed_job_ids: closed, review_window_days: windowDays, checked_at: now.toISOString() };
   }
 
+  /** Request a signed-URL upload slot for ONE review photo (Batch 2 §2).
+   *  Same flow as dispute evidence (TrustService.requestEvidenceUpload):
+   *  the client requests a slot, PUTs/POSTs the photo bytes to the
+   *  returned upload_url, then passes the storage_key as one of
+   *  photo_keys when creating the review. The key is namespaced to the job
+   *  and random, so a key issued for another job (or hand-typed) cannot be
+   *  attached — review() enforces the prefix. Only a job party, only while
+   *  the job is PAYMENT_SETTLED (reviews are only allowed then). */
+  async requestReviewUpload(jobId: string, userId: string) {
+    const job = (await this.db.query<{ state: string; customer_id: string; provider_id: string }>(
+      `SELECT j.state, j.customer_id, p.user_id AS provider_user_id FROM jobs j JOIN provider_profiles p ON p.id=j.provider_id WHERE j.id=$1`, [jobId])).rows[0] as unknown as { state: string; customer_id: string; provider_user_id: string } | undefined;
+    if (!job) throw Errors.notFound('Job');
+    if (userId !== job.customer_id && userId !== job.provider_user_id) throw Errors.forbidden('Only the job parties can add review photos');
+    if (job.state !== 'PAYMENT_SETTLED') throw Errors.conflict('NOT_SETTLED', 'Review photos can only be uploaded after PAYMENT_SETTLED');
+    const storageKey = `reviews/${jobId}/photo-${randomUUID()}.bin`;
+    const base = process.env.STORAGE_UPLOAD_BASE_URL ?? 'http://localhost:3000/api/v1/uploads';
+    return { upload_url: `${base}/${encodeURIComponent(storageKey)}`, storage_key: storageKey };
+  }
+
   /** Reviews (Fix B): only after PAYMENT_SETTLED, one per side (PRD p.17),
    *  only by a job party. The job moves PAYMENT_SETTLED -> RATED when BOTH
    *  sides have now reviewed — checked inside the SAME transaction as the
@@ -243,11 +408,26 @@ export class JobsService {
    *  'both_reviews_submitted'). Until both have reviewed the job stays
    *  PAYMENT_SETTLED. After RATED — or once the review window has elapsed
    *  (the late reviewer finds the job already closed to RATED) — any
-   *  further review is 409 REVIEW_WINDOW_CLOSED. */
-  async review(jobId: string, reviewerId: string, stars: number, tags?: string[], comment?: string) {
+   *  further review is 409 REVIEW_WINDOW_CLOSED.
+   *
+   *  Batch 2 (§2) photo reviews: optional photo_keys (max 3). Each key
+   *  must have been issued for THIS job by requestReviewUpload — a
+   *  hand-typed or foreign key is rejected 422 INVALID_PHOTO_KEY, exactly
+   *  like dispute evidence. Photos are stored on the review row
+   *  (reviews.photos jsonb) and returned by GET provider reviews. */
+  async review(jobId: string, reviewerId: string, stars: number, tags?: string[], comment?: string, photoKeys?: string[]) {
     const job = (await this.db.query<{ state: string; customer_id: string; provider_id: string }>(
       `SELECT j.state, j.customer_id, p.user_id AS provider_user_id FROM jobs j JOIN provider_profiles p ON p.id=j.provider_id WHERE j.id=$1`, [jobId])).rows[0] as unknown as { state: string; customer_id: string; provider_user_id: string } | undefined;
     if (!job) throw Errors.notFound('Job');
+    if (photoKeys && photoKeys.length > 3) throw Errors.unprocessable('TOO_MANY_PHOTOS', 'At most 3 photos per review');
+    if (photoKeys) {
+      const prefix = `reviews/${jobId}/photo-`;
+      for (const key of photoKeys) {
+        if (!key.startsWith(prefix)) {
+          throw Errors.unprocessable('INVALID_PHOTO_KEY', 'Photo keys must be issued for this job — call POST /jobs/:id/reviews/upload-request first');
+        }
+      }
+    }
     if (job.state === 'RATED') throw Errors.conflict('REVIEW_WINDOW_CLOSED', 'The review window for this job has closed — the job is already RATED');
     if (job.state !== 'PAYMENT_SETTLED') throw Errors.conflict('NOT_SETTLED', 'Reviews are only allowed after PAYMENT_SETTLED');
     const isCustomer = reviewerId === job.customer_id;
@@ -269,9 +449,9 @@ export class JobsService {
     const out = await this.db.withTransaction(async (c) => {
       const client = c as unknown as { query: (t: string, p?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> };
       const review = (await c.query(
-        `INSERT INTO reviews (job_id, reviewer_id, reviewee_id, stars, tags, comment) VALUES ($1,$2,$3,$4,$5,$6)
+        `INSERT INTO reviews (job_id, reviewer_id, reviewee_id, stars, tags, comment, photos) VALUES ($1,$2,$3,$4,$5,$6,$7)
          ON CONFLICT (job_id, reviewer_id) DO NOTHING RETURNING *`,
-        [jobId, reviewerId, revieweeId, stars, tags ?? [], comment ?? null])).rows[0];
+        [jobId, reviewerId, revieweeId, stars, tags ?? [], comment ?? null, JSON.stringify(photoKeys ?? [])])).rows[0];
       if (!review) throw Errors.conflict('ALREADY_REVIEWED', 'You have already reviewed this job');
       // Recompute the provider's Bayesian rating from all their reviews.
       const agg = (await c.query<{ avg: string; cnt: string }>(
@@ -296,6 +476,6 @@ export class JobsService {
     if (out.jobState === 'RATED') {
       this.realtime.emitToRoom(`job:${jobId}`, 'job.state_changed', { job_id: jobId, from: 'PAYMENT_SETTLED', to: 'RATED', actor: reviewerId, at: new Date().toISOString() });
     }
-    return { ...out.review, job_state: out.jobState };
+    return { ...out.review, photos: (out.review as Record<string, unknown>).photos ?? [], job_state: out.jobState };
   }
 }

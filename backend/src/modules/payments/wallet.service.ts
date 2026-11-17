@@ -230,6 +230,11 @@ export class WalletService {
       )).rows[0] as unknown as Record<string, unknown> | undefined;
       if (!job) throw Errors.notFound('Job');
       if (job.state !== 'COMPLETED') throw Errors.conflict('NOT_COMPLETED', 'Wallet payment is only allowed after COMPLETED');
+      // Batch 2 (§6a): no settlement before the customer confirms
+      // completion — same gate as cash confirmPayment. The customer
+      // confirms via POST /jobs/:id/confirm-completion, or the
+      // auto-confirm sweep confirms it after the window elapses.
+      if (!job.completion_confirmed_at) throw Errors.conflict('COMPLETION_NOT_CONFIRMED', 'The customer must confirm completion before wallet payment');
       if (job.customer_id !== userId) throw Errors.forbidden('Only the job customer can pay from wallet');
       const finalPaisa = pkrToPaisa(Number(job.final_price ?? job.agreed_price));
       const rate = Number(job.commission_rate);

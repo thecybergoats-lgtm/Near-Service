@@ -77,6 +77,12 @@ const envSchema = z
     JWT_REFRESH_TTL_SECONDS: z.coerce.number().int().positive().default(2592000),
     STORAGE_UPLOAD_BASE_URL: z.string().optional(),
     PAYMENT_GATEWAY_MODE: z.enum(['sandbox', 'live']).default('sandbox'),
+    // Batch 2 push plumbing: the Firebase service-account JSON (as a JSON
+    // string) for server-side FCM sends. OPTIONAL — when unset the FCM
+    // provider reports unconfigured and NotificationsService degrades to
+    // the no-op path (logs + skips, never 500s). See
+    // docs/push-notifications-setup.md for what the user must provide.
+    FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
     // FIX 12 (Stage 3): CORS allowlist, comma-separated origins
     // (e.g. "https://admin.nearservice.pk,http://localhost:3001"). Empty
     // in production means NO browser origin is allowed (see config/cors.ts).
@@ -229,6 +235,8 @@ const envSchema = z
       },
       storageUploadBaseUrl: v.STORAGE_UPLOAD_BASE_URL,
       paymentGatewayMode: v.PAYMENT_GATEWAY_MODE,
+      // Batch 2 push plumbing (optional; see FCM_SERVICE_ACCOUNT_JSON above).
+      fcmServiceAccountJson: v.FCM_SERVICE_ACCOUNT_JSON?.trim() ? v.FCM_SERVICE_ACCOUNT_JSON.trim() : undefined,
       // FIX 12: split + trim; empty string -> [] (no origins allowed in prod).
       corsOrigins: v.CORS_ORIGINS ? v.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean) : [],
       fieldEncryptionKey: fieldKey(v.FIELD_ENCRYPTION_KEY, DEV_FIELD_KEY_B64),

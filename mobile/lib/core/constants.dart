@@ -58,4 +58,5 @@ class StorageKeys {
   static const String deviceId = 'ns_device_id'; // id returned by POST /me/devices
   static const String onboardingDone = 'ns_onboarding_done';
   static const String notificationsEnabled = 'ns_notifications_enabled'; // local only
+  static const String themeMode = 'ns_theme_mode'; // 'system' | 'light' | 'dark'
 }

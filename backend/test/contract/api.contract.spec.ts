@@ -364,6 +364,17 @@ maybeDescribe('golden flow (real Postgres + Redis, OpenAPI schema-validated)', (
     validateResponse('completeJob', 200, done.body);
     expect(done.body.state).toBe('COMPLETED');
 
+    // --- confirm completion (Batch 2 §6a): provider cannot confirm (403),
+    //     customer confirms once; payment is blocked until then --------------
+    const blockedPay = await api().post(`/api/v1/jobs/${jobId}/confirm-payment`).set('Authorization', `Bearer ${customerToken}`).send({});
+    expect(blockedPay.status).toBe(409);
+    expect(blockedPay.body.error.code).toBe('COMPLETION_NOT_CONFIRMED');
+    const providerConfirm = await api().post(`/api/v1/jobs/${jobId}/confirm-completion`).set('Authorization', `Bearer ${providerToken}`).send({});
+    expect(providerConfirm.status).toBe(403);
+    const confirmed = await api().post(`/api/v1/jobs/${jobId}/confirm-completion`).set('Authorization', `Bearer ${customerToken}`).send({});
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.completion_confirmed_at).toBeTruthy();
+
     // --- confirm payment: customer first, then provider settles ---------------
     const confirm1 = await api().post(`/api/v1/jobs/${jobId}/confirm-payment`).set('Authorization', `Bearer ${customerToken}`).send({});
     expect(confirm1.status).toBe(200);

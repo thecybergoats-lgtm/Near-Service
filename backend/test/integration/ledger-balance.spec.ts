@@ -166,8 +166,8 @@ maybeDescribe('ledger balance guard + reconciliation (real DB + Redis)', () => {
       [requestId, providerId],
     )).rows[0].id as string;
     const jobId = (await admin.query(
-      `INSERT INTO jobs (request_id, offer_id, customer_id, provider_id, agreed_price, final_price, commission_rate, state, payment_method, payment_status)
-       VALUES ($1,$2,$3,$4,1000,1000,0.1,'COMPLETED','cash','unpaid') RETURNING id`,
+      `INSERT INTO jobs (request_id, offer_id, customer_id, provider_id, agreed_price, final_price, commission_rate, state, payment_method, payment_status, completion_confirmed_at, completion_confirmed_by)
+       VALUES ($1,$2,$3,$4,1000,1000,0.1,'COMPLETED','cash','unpaid', now(), $3) RETURNING id`,
       [requestId, offerId, customerId, providerId],
     )).rows[0].id as string;
 

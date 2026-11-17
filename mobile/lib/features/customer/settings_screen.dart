@@ -6,13 +6,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/api_client.dart';
 import '../../core/constants.dart';
 import '../../core/models.dart';
+import '../../core/theme.dart';
 import '../../l10n/app_localizations.dart';
 import 'wallet_screen.dart';
 
-/// Settings: language, notifications, privacy (export/delete),
-/// help & dispute centre entry, logout.
+/// Settings: language, appearance (dark mode), notifications, privacy
+/// (export/delete), help & dispute centre entry, Live Support, logout.
 /// Phase 2: promo & referral section (own code, referred count,
 /// credit, claim-a-code) and a real dispute-centre entry.
+/// Batch 2: dark-mode toggle (persisted, applied app-wide via
+/// themeModeProvider) and the notifications toggle now ALSO syncs to
+/// PATCH /users/me/notification-preferences — local persistence stays
+/// as the fallback when the call fails. Real push delivery still
+/// needs Firebase (docs/push-notifications-setup.md); this toggle
+/// only records the preference.
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
@@ -23,9 +30,8 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   ReferralInfo? _referral;
   bool _referralFailed = false;
-  // Local-only notification preference (no backend call — the server has
-  // no notification-preference store in Phase 1).
   bool _notificationsEnabled = true;
+  bool _syncingNotifications = false;
 
   @override
   void initState() {
@@ -45,9 +51,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _setNotifications(bool value) async {
-    setState(() => _notificationsEnabled = value);
+    setState(() {
+      _notificationsEnabled = value;
+      _syncingNotifications = true;
+    });
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(StorageKeys.notificationsEnabled, value);
+    try {
+      await ref
+          .read(apiClientProvider)
+          .updateNotificationPreferences(pushEnabled: value);
+    } catch (_) {
+      // Local preference is kept; the server sync is retried on the
+      // next toggle. The user is told only if they are offline —
+      // the toggle itself already reflects their choice.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Saved on this phone — will sync to the server when you are back online.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _syncingNotifications = false);
+    }
   }
 
   Future<void> _loadReferral() async {
@@ -59,28 +86,55 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
+  Future<void> _changeLanguage(String lang) async {
+    ref.read(localeProvider.notifier).state = lang;
+    await persistLocale(lang);
+    try {
+      await ref.read(apiClientProvider).patchMe({'language': lang});
+    } catch (_) {
+      // Language applies locally regardless; server sync best-effort.
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // ConsumerState exposes `ref` as a property — no second parameter.
     final locale = ref.watch(localeProvider);
+    final l = L.of(locale);
+    final themeMode = ref.watch(themeModeProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text('Language', style: TextStyle(fontWeight: FontWeight.w700)),
+          Text(l.t('language'),
+              style: const TextStyle(fontWeight: FontWeight.w700)),
           ...[
-            ('ur', 'اردو — Urdu'),
             ('en', 'English'),
             ('ur-roman', 'Roman Urdu'),
+            ('ur', 'اردو — Urdu'),
           ].map((o) => RadioListTile<String>(
                 title: Text(o.$2),
                 value: o.$1,
                 groupValue: locale,
+                onChanged: (v) {
+                  if (v != null) _changeLanguage(v);
+                },
+              )),
+          const Divider(),
+          Text(l.t('appearance'),
+              style: const TextStyle(fontWeight: FontWeight.w700)),
+          ...[
+            (ThemeMode.system, l.t('system_default')),
+            (ThemeMode.light, l.t('light')),
+            (ThemeMode.dark, l.t('dark')),
+          ].map((o) => RadioListTile<ThemeMode>(
+                title: Text(o.$2),
+                value: o.$1,
+                groupValue: themeMode,
                 onChanged: (v) async {
                   if (v == null) return;
-                  ref.read(localeProvider.notifier).state = v;
-                  await persistLocale(v);
+                  ref.read(themeModeProvider.notifier).state = v;
+                  await persistThemeMode(v);
                 },
               )),
           const Divider(),
@@ -107,8 +161,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const Divider(),
           ListTile(
             leading: const Icon(Icons.favorite_border),
-            title: const Text('Favorites'),
+            title: Text(l.t('favourites')),
             onTap: () => context.push('/customer/favorites'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.headset_mic_outlined),
+            title: Text(l.t('live_support')),
+            subtitle: Text(l.t('support_will_reply')),
+            onTap: () => context.push('/customer/support'),
           ),
           ListTile(
             leading: const Icon(Icons.contacts_outlined),
@@ -119,9 +179,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           SwitchListTile(
             secondary: const Icon(Icons.notifications_outlined),
             title: const Text('Notifications'),
-            subtitle: const Text('Offers, job updates, critical SMS'),
+            subtitle: Text(_syncingNotifications
+                ? 'Syncing preference…'
+                : 'Offers, job updates, critical SMS'),
             value: _notificationsEnabled,
-            onChanged: _setNotifications,
+            onChanged: _syncingNotifications ? null : _setNotifications,
           ),
           ListTile(
             leading: const Icon(Icons.help_outline),

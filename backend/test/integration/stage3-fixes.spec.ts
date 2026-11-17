@@ -114,8 +114,8 @@ maybeDescribe('Stage 3 fixes (real DB + Redis)', () => {
       [req.rows[0].id, providerId, finalPrice],
     );
     const job = await admin.query(
-      `INSERT INTO jobs (request_id, offer_id, customer_id, provider_id, agreed_price, final_price, commission_rate, state, payment_status)
-       VALUES ($1,$2,$3,$4,$5,$5,0.10,$6,$7) RETURNING id`,
+      `INSERT INTO jobs (request_id, offer_id, customer_id, provider_id, agreed_price, final_price, commission_rate, state, payment_status, completion_confirmed_at, completion_confirmed_by)
+       VALUES ($1,$2,$3,$4,$5,$5,0.10,$6,$7, now(), $3) RETURNING id`,
       [req.rows[0].id, offer.rows[0].id, customerId, providerId, finalPrice, state, paymentStatus],
     );
     return job.rows[0].id as string;

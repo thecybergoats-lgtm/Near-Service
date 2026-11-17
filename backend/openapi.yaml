@@ -1,10 +1,10 @@
-# Near Service API — OpenAPI 3.1, version 1.7.0 (v1.6.0 + Places discovery via OpenStreetMap).
+# Near Service API — OpenAPI 3.1, version 1.8.0 (v1.7.0 + Batch 2 trust & safety: favourites, photo reviews, live support, push plumbing, promo listing, customer-confirms-completion, pickup-time / no-show).
 # Source of truth for the contract test (test/contract/api.contract.spec.ts):
 # the set of (method, path) here must equal the routes registered by the Nest app.
 openapi: 3.1.0
 info:
   title: Near Service API
-  version: 1.7.0
+  version: 1.8.0
   description: 'OpenAPI 3.1 skeleton for the Near Service Phase 1 (MVP) endpoints. Companion to the Phase 0 PRD v1.1. Phase 2 endpoints (wallet, payment intents, payouts, escrow) are intentionally excluded
     and will extend this file. Identifier rule (v1.1): category_id is always a UUID (format: uuid). A client may instead send category_slug; the API resolves the slug to its UUID and echoes the canonical
     UUID in every response.
@@ -24,7 +24,9 @@ info:
 
     v1.5 changes (Phase 3): v1.4.0 plus every Phase 3 route — AI Gateway (intent / photo / voice search, fair-price model, chat translation), risk engine, subscriptions + teams, tenders (incl. the POST /admin/tenders/expire-due sweep — no in-process scheduler exists in this repo), verification (face-match / liveness / OCR assist, advisory only), and escrow + payouts (sandbox: true on every payout response). Integration points wired: risk penalty + featured Sponsored placement in provider ranking, plan-discounted commission in offer accept, verification evidence attached to the admin verification decision (supporting evidence only — tier upgrades stay officer-gated).
 
-    v1.6 changes (Phase 4): search scale-out (SearchModule providers + metrics/gate admin endpoints + POST /search/click for CTR), analytics warehouse (ETL run/status, funnel, revenue, supply-demand, CSV exports subject to legal review), multi-city ops (admin city CRUD, targets, gate config/evaluations, status, manager assignment, checklist, category overrides, effective commission, commission rules, fair price) + public SEO landing/shop pages (server-rendered HTML), warranty product (opt-in, fee quote/collection at settlement, claims state machine, admin review, config, versioned rules, expiry sweep), partner integrations (parts catalog + orders with affiliate fee and in-app disclosure, admin partner/catalog/order management, fee report). No scheduler exists in this repo: the analytics ETL (02:00 PKT) and warranty expiry sweep run from an external scheduler; see docs/phase4-api-addendum.md.'
+    v1.6 changes (Phase 4): search scale-out (SearchModule providers + metrics/gate admin endpoints + POST /search/click for CTR), analytics warehouse (ETL run/status, funnel, revenue, supply-demand, CSV exports subject to legal review), multi-city ops (admin city CRUD, targets, gate config/evaluations, status, manager assignment, checklist, category overrides, effective commission, commission rules, fair price) + public SEO landing/shop pages (server-rendered HTML), warranty product (opt-in, fee quote/collection at settlement, claims state machine, admin review, config, versioned rules, expiry sweep), partner integrations (parts catalog + orders with affiliate fee and in-app disclosure, admin partner/catalog/order management, fee report). No scheduler exists in this repo: the analytics ETL (02:00 PKT) and warranty expiry sweep run from an external scheduler; see docs/phase4-api-addendum.md.
+
+    v1.8 changes (Batch 2, trust & safety): the spec is now 243 paths / 272 operations (+14 paths / +19 ops): favourites (POST/DELETE /providers/{providerId}/favourite, GET /favourites); photo reviews (photo_keys on POST /jobs/{jobId}/reviews, POST /jobs/{jobId}/reviews/upload-request, photos on provider reviews); live support tickets (POST/GET /support/threads, GET/POST /support/threads/{threadId}/messages, GET /admin/support/threads, POST /admin/support/threads/{threadId}/messages, POST /admin/support/threads/{threadId}/close — no fake agent replies, an unanswered thread stays open); push plumbing (POST /devices/register, GET/PATCH /users/me/notification-preferences — FCM sends only when FCM_SERVICE_ACCOUNT_JSON is configured, otherwise the no-op provider logs + skips, never 500s); public GET /promotions/active for the home banner; customer-confirms-completion (POST /jobs/{jobId}/complete is now provider-only, new POST /jobs/{jobId}/confirm-completion, confirmPayment/wallet-pay/escrow-release blocked until completion_confirmed_at, POST /admin/jobs/auto-confirm-completions sweep with feature_flags completion_confirm_window_hours default 48); pickup-time commitment (optional scheduled_at on POST /offers/{offerId}/accept, must be in the future) and POST /jobs/{jobId}/report-no-show (customer-only, after scheduled_at, increments provider no_show_count + a no_show risk event). See docs/batch2-api-addendum.md and docs/push-notifications-setup.md.'
   contact:
     name: Near Service engineering
 servers:
@@ -683,6 +685,27 @@ components:
           type: string
           format: date-time
           readOnly: true
+        scheduled_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: 'Batch 2 (§6b): the pickup time the provider committed to when the offer was accepted (stored on the linked service request; also set by reschedule). Null when no time was committed.'
+          readOnly: true
+        completion_confirmed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: 'Batch 2 (§6a): when the customer confirmed the completed work (null until confirmed — or until the auto-confirm sweep confirms it after completion_confirm_window_hours, default 48). Payment (cash, wallet, escrow) is blocked until this is set.'
+          readOnly: true
+        completion_confirmed_by:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          description: 'Batch 2 (§6a): the customer who confirmed completion (null when auto-confirmed by system).'
+          readOnly: true
       example:
         id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
         request_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
@@ -755,6 +778,12 @@ components:
           type:
           - string
           - 'null'
+        photo_keys:
+          type: array
+          description: 'Batch 2 (§2): up to 3 photo storage keys, each issued for this job by POST /jobs/{jobId}/reviews/upload-request (dispute-evidence pattern). An unknown key is 422 INVALID_PHOTO_KEY.'
+          items:
+            type: string
+          maxItems: 3
     Message:
       type: object
       properties:
@@ -1285,6 +1314,12 @@ components:
             type: string
           readOnly: true
           maxItems: 10
+        photos:
+          type: array
+          description: 'Batch 2 (§2): photo storage keys attached to this review (max 3, empty when none).'
+          items:
+            type: string
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -2613,6 +2648,273 @@ components:
         checked_at:
           type: string
           format: date-time
+    AutoConfirmCompletionsResponse:
+      type: object
+      description: 'Batch 2 (§6a): result of POST /admin/jobs/auto-confirm-completions. Idempotent — a re-run returns confirmed_count 0.'
+      required:
+      - confirmed_count
+      - confirmed_job_ids
+      - completion_confirm_window_hours
+      - checked_at
+      properties:
+        confirmed_count:
+          type: integer
+        confirmed_job_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        completion_confirm_window_hours:
+          type: integer
+          description: The window (hours) read from feature_flags completion_confirm_window_hours at run time (default 48).
+        checked_at:
+          type: string
+          format: date-time
+    ReportNoShowResponse:
+      type: object
+      description: 'Batch 2 (§6b): result of POST /jobs/{jobId}/report-no-show.'
+      required:
+      - job_id
+      - provider_id
+      - no_show_count
+      - scheduled_at
+      - reported_at
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        provider_id:
+          type: string
+          format: uuid
+        no_show_count:
+          type: integer
+          description: The provider's running no-show total (provider_profiles.no_show_count).
+        scheduled_at:
+          type: string
+          format: date-time
+        reported_at:
+          type: string
+          format: date-time
+    Favourite:
+      type: object
+      required:
+      - provider_id
+      - favourited_at
+      - already
+      properties:
+        provider_id:
+          type: string
+          format: uuid
+        favourited_at:
+          type: string
+          format: date-time
+        already:
+          type: boolean
+          description: True when the provider was already favourited (idempotent repeat — no duplicate row).
+    FavouritePage:
+      allOf:
+      - $ref: '#/components/schemas/Page'
+      - type: object
+        required:
+        - items
+        - next_cursor
+        properties:
+          items:
+            type: array
+            items:
+              type: object
+              properties:
+                provider_id:
+                  type: string
+                  format: uuid
+                display_name:
+                  type: string
+                provider_type:
+                  type: string
+                rating_bayes:
+                  type: number
+                jobs_completed:
+                  type: integer
+                favourited_at:
+                  type: string
+                  format: date-time
+    CreateSupportThread:
+      type: object
+      required:
+      - subject
+      - message
+      properties:
+        subject:
+          type: string
+          maxLength: 200
+        message:
+          type: string
+          maxLength: 2000
+    SupportMessageInput:
+      type: object
+      required:
+      - body
+      properties:
+        body:
+          type: string
+          maxLength: 2000
+    SupportThread:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        customer_id:
+          type: string
+          format: uuid
+          readOnly: true
+        subject:
+          type: string
+        status:
+          type: string
+          enum:
+          - open
+          - closed
+          description: 'Batch 2 (§3): an unanswered thread stays open — there is no bot or fake agent reply.'
+        closed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          readOnly: true
+        closed_by:
+          type:
+          - string
+          - 'null'
+          format: uuid
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        first_message:
+          $ref: '#/components/schemas/SupportMessage'
+    SupportThreadPage:
+      allOf:
+      - $ref: '#/components/schemas/Page'
+      - type: object
+        required:
+        - items
+        - next_cursor
+        properties:
+          items:
+            type: array
+            items:
+              $ref: '#/components/schemas/SupportThread'
+    SupportMessage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        thread_id:
+          type: string
+          format: uuid
+          readOnly: true
+        sender_id:
+          type: string
+          format: uuid
+          readOnly: true
+        sender_role:
+          type: string
+          enum:
+          - customer
+          - support
+        body:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+    SupportMessagePage:
+      allOf:
+      - $ref: '#/components/schemas/Page'
+      - type: object
+        required:
+        - items
+        - next_cursor
+        properties:
+          items:
+            type: array
+            items:
+              $ref: '#/components/schemas/SupportMessage'
+    DeviceTokenInput:
+      type: object
+      required:
+      - device_token
+      - platform
+      properties:
+        device_token:
+          type: string
+          maxLength: 512
+          description: 'Batch 2 (§4): the FCM device token. Stored on user_devices.fcm_token (FCM needs the raw token to deliver); the lookup key is its SHA-256. Never logged, never returned.'
+        platform:
+          type: string
+          enum:
+          - android
+          - ios
+    RegisteredDevice:
+      type: object
+      required:
+      - device_id
+      - platform
+      - last_seen_at
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        platform:
+          type: string
+          enum:
+          - android
+          - ios
+        last_seen_at:
+          type: string
+          format: date-time
+    NotificationPreferences:
+      type: object
+      required:
+      - push_enabled
+      properties:
+        push_enabled:
+          type: boolean
+          description: 'Batch 2 (§4): false stops all push sends to the caller. Default true (users.push_enabled).'
+    ActivePromo:
+      type: object
+      required:
+      - code
+      - title
+      - discount_text
+      properties:
+        code:
+          type: string
+          description: The promo code (e.g. FIRSTJOB10).
+        title:
+          type: string
+          description: Display title — echoes the code (the promos table has no title column).
+        discount_text:
+          type: string
+          description: Derived from kind/value, e.g. "10% off" or "PKR 500 off".
+    ActivePromoList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivePromo'
     OnboardingStep:
       type: object
       required:
@@ -5387,6 +5689,17 @@ paths:
           type: string
           format: uuid
       - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scheduled_at:
+                  type: string
+                  format: date-time
+                  description: 'Batch 2 (§6b): optional pickup-time commitment (ISO 8601, must be in the future; a past value is 422 SCHEDULED_AT_PAST). Stored on the linked service request and returned as Job.scheduled_at.'
       responses:
         '201':
           description: Job created at the locked price
@@ -5618,6 +5931,7 @@ paths:
       tags:
       - Jobs
       operationId: completeJob
+      summary: 'Batch 2 (§6a): provider marks work done — provider-only. A customer calling it gets 403; the customer confirms afterwards via POST /jobs/{jobId}/confirm-completion.'
       parameters:
       - name: jobId
         in: path
@@ -5635,8 +5949,68 @@ paths:
                 $ref: '#/components/schemas/Job'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+  /jobs/{jobId}/confirm-completion:
+    post:
+      tags:
+      - Jobs
+      operationId: confirmCompletion
+      summary: 'Batch 2 (§6a): the customer confirms the completed work. Provider -> 403, double-confirm -> 409 ALREADY_CONFIRMED, job not COMPLETED -> 409 NOT_COMPLETED. Payment stays blocked until this is set.'
+      parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - *id001
+      responses:
+        '200':
+          description: Completion confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /jobs/{jobId}/report-no-show:
+    post:
+      tags:
+      - Jobs
+      operationId: reportNoShow
+      summary: 'Batch 2 (§6b): the customer reports the provider did not show up at the committed pickup time. Only when now > scheduled_at and the job is not COMPLETED; increments provider no_show_count and writes a no_show risk event. The job state does not change — the customer can then cancel it.'
+      parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - *id001
+      responses:
+        '200':
+          description: No-show recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportNoShowResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /jobs/{jobId}/confirm-payment:
     post:
       tags:
@@ -5694,6 +6068,35 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/ValidationError'
+  /jobs/{jobId}/reviews/upload-request:
+    post:
+      tags:
+      - Jobs
+      operationId: requestReviewUpload
+      summary: 'Batch 2 (§2): request a signed-URL upload slot for one review photo (same flow as dispute evidence). The returned storage_key is passed as one of photo_keys when creating the review.'
+      parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - *id001
+      responses:
+        '200':
+          description: Upload URL + storage key; upload the photo bytes to upload_url, then pass storage_key as one of photo_keys when creating the review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentUploadResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /jobs/{jobId}/disputes:
     post:
       tags:
@@ -5806,6 +6209,208 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/ValidationError'
+  # ---- Batch 2 (v1.8): live support tickets ----------------------------
+  # New tables (support_threads + support_messages), NOT the chats tables:
+  # chats are keyed to a job + provider, a support thread has neither.
+  # No bot, no canned reply, no fake agent: an unanswered thread stays
+  # status open until a human with super_admin / support_agent replies
+  # or closes it.
+  /support/threads:
+    post:
+      tags:
+      - Support
+      operationId: createSupportThread
+      summary: 'Batch 2 (§3): open a support thread with a subject + first message'
+      parameters:
+      - *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSupportThread'
+      responses:
+        '201':
+          description: Thread opened (includes the first message)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportThread'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    get:
+      tags:
+      - Support
+      operationId: listSupportThreads
+      summary: 'Batch 2 (§3): the caller''s own support threads, newest first'
+      parameters:
+      - *id005
+      - *id006
+      responses:
+        '200':
+          description: Paginated threads
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportThreadPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /support/threads/{threadId}/messages:
+    get:
+      tags:
+      - Support
+      operationId: listSupportMessages
+      summary: 'Batch 2 (§3): messages of one thread (customer or support only), oldest first; next_cursor is the oldest message id in the page'
+      parameters:
+      - name: threadId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - *id005
+      - *id006
+      responses:
+        '200':
+          description: Paginated messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportMessagePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags:
+      - Support
+      operationId: sendSupportMessage
+      summary: 'Batch 2 (§3): the customer replies on their own thread (closed thread -> 409)'
+      parameters:
+      - name: threadId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupportMessageInput'
+      responses:
+        '201':
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportMessage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /admin/support/threads:
+    get:
+      tags:
+      - Support
+      operationId: listAdminSupportThreads
+      summary: 'Batch 2 (§3): all support threads for support/admin, filterable by status=open|closed'
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - open
+          - closed
+      - *id005
+      - *id006
+      responses:
+        '200':
+          description: Paginated threads
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportThreadPage'
+        '401': *id002
+        '403': *id003
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /admin/support/threads/{threadId}/messages:
+    post:
+      tags:
+      - Support
+      operationId: replySupportThread
+      summary: 'Batch 2 (§3): support/admin replies on a thread (closed thread -> 409). Best-effort push to the customer.'
+      parameters:
+      - name: threadId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupportMessageInput'
+      responses:
+        '201':
+          description: Reply sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportMessage'
+        '401': *id002
+        '403': *id003
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /admin/support/threads/{threadId}/close:
+    post:
+      tags:
+      - Support
+      operationId: closeSupportThread
+      summary: 'Batch 2 (§3): close a support thread (final — a closed thread cannot be re-opened; the customer opens a new thread)'
+      parameters:
+      - name: threadId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - *id001
+      responses:
+        '200':
+          description: Thread closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportThread'
+        '401': *id002
+        '403': *id003
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /reports:
     post:
       tags:
@@ -6338,6 +6943,67 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/ValidationError'
+  /providers/{providerId}/favourite:
+    post:
+      tags:
+      - Providers
+      operationId: addFavourite
+      summary: 'Batch 2 (§1): favourite a provider. Idempotent — a repeat favourite returns the same row with already=true and never duplicates.'
+      parameters:
+      - name: providerId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - *id001
+      responses:
+        '201':
+          description: Favourite recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Favourite'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - Providers
+      operationId: removeFavourite
+      summary: 'Batch 2 (§1): unfavourite a provider. Idempotent — removing a favourite that does not exist is still 204.'
+      parameters:
+      - name: providerId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - *id001
+      responses:
+        '204':
+          description: Favourite removed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /favourites:
+    get:
+      tags:
+      - Providers
+      operationId: listFavourites
+      summary: 'Batch 2 (§1): the caller''s favourites, newest first (cursor-paginated {items, next_cursor})'
+      parameters:
+      - *id005
+      - *id006
+      responses:
+        '200':
+          description: Paginated favourites
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FavouritePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /me/devices:
     post:
       tags:
@@ -6388,6 +7054,71 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+  # ---- Batch 2 (v1.8): push device registration + preferences ----------
+  /devices/register:
+    post:
+      tags:
+      - Profile
+      operationId: registerPushDevice
+      summary: 'Batch 2 (§4): register the caller''s FCM device token (upsert per user+device; the device key is the SHA-256 of the token). The response never echoes the token.'
+      parameters:
+      - *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceTokenInput'
+      responses:
+        '201':
+          description: Device registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisteredDevice'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /users/me/notification-preferences:
+    get:
+      tags:
+      - Profile
+      operationId: getNotificationPreferences
+      summary: 'Batch 2 (§4): the caller''s notification preferences (push_enabled, default true)'
+      responses:
+        '200':
+          description: Preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags:
+      - Profile
+      operationId: updateNotificationPreferences
+      summary: 'Batch 2 (§4): set push_enabled (disabling it stops all push sends to the caller)'
+      parameters:
+      - *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationPreferences'
+      responses:
+        '200':
+          description: Preferences updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
   /me/trusted-contacts:
     get:
       tags:
@@ -6784,6 +7515,22 @@ paths:
         '401': *id002
         '403': *id003
       description: 'Fix B: an external scheduler must call this endpoint nightly. The review window is admin-configurable via feature_flags review_window_days (default 7 days) and starts at the latest job_events row with to_state=PAYMENT_SETTLED. A job also moves to RATED as soon as both sides have reviewed (POST /jobs/{jobId}/reviews); after RATED no more reviews are accepted (409 REVIEW_WINDOW_CLOSED). Idempotent: a re-run closes nothing.'
+  /admin/jobs/auto-confirm-completions:
+    post:
+      tags:
+      - Admin
+      operationId: adminAutoConfirmCompletions
+      summary: 'Batch 2 (§6a): auto-confirm completions — COMPLETED jobs older than the confirm window (feature_flags completion_confirm_window_hours, default 48) that the customer has not confirmed are confirmed by system (cron entry point, no cron infra in-repo)'
+      responses:
+        '200':
+          description: Confirmed jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoConfirmCompletionsResponse'
+        '401': *id002
+        '403': *id003
+      description: 'Batch 2 (§6a): an external scheduler must call this endpoint (e.g. hourly). The window is admin-configurable via feature_flags completion_confirm_window_hours (default 48 hours, 1–720) and starts at jobs.completed_at. Idempotent: a re-run confirms nothing. Escrow auto-release and payment both wait for this confirmation, so this sweep is what eventually settles a job whose customer never responds.'
   /admin/reconciliation:
     get:
       tags:
@@ -7098,6 +7845,21 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/PayWalletRequest'
+  # ---- Batch 2 (v1.8): public active-promo listing for the home banner --
+  /promotions/active:
+    get:
+      tags:
+      - Profile
+      operationId: listActivePromos
+      summary: 'Batch 2 (§5): currently-active promos for the mobile home banner (public — the banner renders before login). The promos table has no title column, so title echoes the code; discount_text is derived from kind/value.'
+      security: []
+      responses:
+        '200':
+          description: Active promos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivePromoList'
   /promos/validate:
     post:
       tags:

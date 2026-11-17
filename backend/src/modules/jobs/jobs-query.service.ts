@@ -68,6 +68,10 @@ function toJobExtended(row: Record<string, unknown>) {
     ...toJob(row),
     customer_id: row.customer_id,
     provider_id: row.provider_id,
+    // Batch 2 (§6a): when the customer confirmed completion (null until
+    // then — or until the auto-confirm sweep confirms it).
+    completion_confirmed_at: row.completion_confirmed_at ?? null,
+    completion_confirmed_by: row.completion_confirmed_by ?? null,
     scheduled_at: row.scheduled_at ?? null,
     created_at: row.created_at,
   };

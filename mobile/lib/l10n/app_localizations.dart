@@ -374,6 +374,97 @@ class L {
       'ur': 'سفر کے دوران آپ کی لائیو لوکیشن کسٹمر کو دکھائی جا رہی ہے۔',
       'ur-roman': 'Safar ke dauran aap ki live location customer ko dikhayi ja rahi hai.',
     },
+    // ---- Batch 2 ----
+    'language': {
+      'en': 'Language',
+      'ur': 'زبان',
+      'ur-roman': 'Language',
+    },
+    'dark_mode': {
+      'en': 'Dark mode',
+      'ur': 'ڈارک موڈ',
+      'ur-roman': 'Dark mode',
+    },
+    'appearance': {
+      'en': 'Appearance',
+      'ur': 'ظاہری شکل',
+      'ur-roman': 'Appearance',
+    },
+    'system_default': {
+      'en': 'System default',
+      'ur': 'سسٹم کی ترتیب',
+      'ur-roman': 'System default',
+    },
+    'light': {
+      'en': 'Light',
+      'ur': 'روشن',
+      'ur-roman': 'Light',
+    },
+    'dark': {
+      'en': 'Dark',
+      'ur': 'ڈارک',
+      'ur-roman': 'Dark',
+    },
+    'live_support': {
+      'en': 'Live Support',
+      'ur': 'لائیو سپورٹ',
+      'ur-roman': 'Live Support',
+    },
+    'support_will_reply': {
+      'en': 'Support will reply soon — your ticket is open.',
+      'ur': 'سپورٹ جلد جواب دے گی — آپ کی ٹکٹ کھلی ہوئی ہے۔',
+      'ur-roman': 'Support jald jawab degi — aap ki ticket khuli hui hai.',
+    },
+    'favourites': {
+      'en': 'Favourites',
+      'ur': 'پسندیدہ',
+      'ur-roman': 'Favourites',
+    },
+    'book_again': {
+      'en': 'Book again',
+      'ur': 'دوبارہ بک کریں',
+      'ur-roman': 'Dobara book karein',
+    },
+    'confirm_completion': {
+      'en': 'Confirm karo — kaam ho gaya',
+      'ur': 'تصدیق کریں — کام ہو گیا',
+      'ur-roman': 'Confirm karo — kaam ho gaya',
+    },
+    'payment_after_confirmation': {
+      'en': 'Payment settles only after you confirm the work is done.',
+      'ur': 'ادائیگی تب ہی ہوگی جب آپ کام مکمل ہونے کی تصدیق کریں گے۔',
+      'ur-roman': 'Payment tab hi hogi jab aap kaam mukammal hone ki tasdeeq karenge.',
+    },
+    'payment_cash_after': {
+      'en': 'Payment: kaam ke baad',
+      'ur': 'ادائیگی: کام کے بعد',
+      'ur-roman': 'Payment: kaam ke baad',
+    },
+    'payment_wallet_escrow': {
+      'en': 'Wallet: pehle escrow mein, kaam ke baad provider ko',
+      'ur': 'والیٹ: پہلے ایسکرو میں، کام کے بعد کاریگر کو',
+      'ur-roman': 'Wallet: pehle escrow mein, kaam ke baad provider ko',
+    },
+    'provider_not_arrived': {
+      'en': 'Provider nahi aaya? Report karo',
+      'ur': 'کاریگر نہیں آیا؟ رپورٹ کریں',
+      'ur-roman': 'Provider nahi aaya? Report karo',
+    },
+    'voice_search_hint': {
+      'en': 'Tap the mic and say what you need, e.g. "AC repair".',
+      'ur': 'مائیک دبائیں اور بتائیں کیا چاہیے، مثلاً "اے سی مرمت"۔',
+      'ur-roman': 'Mic dabayein aur batayein kya chahiye, masalan "AC repair".',
+    },
+    'mic_denied': {
+      'en': 'Microphone is off. Please type your search, or allow microphone access in settings.',
+      'ur': 'مائیکروفون بند ہے۔ براہ کرم ٹائپ کر کے تلاش کریں، یا سیٹنگز میں مائیکروفون کی اجازت دیں۔',
+      'ur-roman': 'Microphone off hai. Please type kar ke search karein, ya settings mein microphone ki ijazat dein.',
+    },
+    'deals': {
+      'en': 'Deals',
+      'ur': 'آفرز',
+      'ur-roman': 'Deals',
+    },
   };
 
   String t(String key) =>

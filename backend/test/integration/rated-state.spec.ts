@@ -231,6 +231,17 @@ maybeDescribe('Fix B — jobs reach RATED (real DB + Redis)', () => {
     expect(done.status).toBe(200);
     expect(done.body.state).toBe('COMPLETED');
 
+    // Batch 2 (§6a): the customer must confirm completion before either
+    // side can confirm payment — and the provider cannot confirm (403).
+    const providerConfirm = await api().post(`/api/v1/jobs/${jobId}/confirm-completion`).set('Authorization', `Bearer ${providerToken}`).send({});
+    expect(providerConfirm.status).toBe(403);
+    const confirmed = await api().post(`/api/v1/jobs/${jobId}/confirm-completion`).set('Authorization', `Bearer ${customerToken}`).send({});
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body.completion_confirmed_at).toBeTruthy();
+    const doubleConfirm = await api().post(`/api/v1/jobs/${jobId}/confirm-completion`).set('Authorization', `Bearer ${customerToken}`).send({});
+    expect(doubleConfirm.status).toBe(409);
+    expect(doubleConfirm.body.error.code).toBe('ALREADY_CONFIRMED');
+
     const c1 = await api().post(`/api/v1/jobs/${jobId}/confirm-payment`).set('Authorization', `Bearer ${customerToken}`).send({});
     expect(c1.status).toBe(200);
     expect(c1.body.state).toBe('COMPLETED');

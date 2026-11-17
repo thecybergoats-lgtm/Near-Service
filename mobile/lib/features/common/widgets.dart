@@ -131,11 +131,16 @@ class ProviderCard extends StatelessWidget {
     required this.provider,
     this.onTap,
     this.onRequestQuote,
+    this.isFavorite,
+    this.onFavoriteToggle,
   });
 
   final ServiceProvider provider;
   final VoidCallback? onTap;
   final VoidCallback? onRequestQuote;
+  /// Null = no heart shown. Non-null = heart state (Batch 2).
+  final bool? isFavorite;
+  final VoidCallback? onFavoriteToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -197,6 +202,15 @@ class ProviderCard extends StatelessWidget {
                     ),
                   ),
                   TierBadge(tier: provider.tier),
+                  if (isFavorite != null)
+                    IconButton(
+                      icon: Icon(
+                        isFavorite! ? Icons.favorite : Icons.favorite_border,
+                        color: isFavorite! ? Colors.red : null,
+                      ),
+                      tooltip: isFavorite! ? 'Remove from favourites' : 'Save to favourites',
+                      onPressed: onFavoriteToggle,
+                    ),
                 ],
               ),
               const SizedBox(height: 12),

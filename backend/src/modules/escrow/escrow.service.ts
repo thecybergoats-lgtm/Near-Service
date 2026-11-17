@@ -304,21 +304,29 @@ export class EscrowService {
     return rows.map(toHold);
   }
 
-  /** Customer confirms completion: release the hold to the provider. */
+  /** Customer confirms completion: release the hold to the provider.
+   *  Batch 2 (§6a): releasing escrow IS the customer confirming completion
+   *  — the release stamps completion_confirmed_at in the same transaction
+   *  before any money moves, so the customer-release path never needs a
+   *  separate confirm-completion call first. */
   async releaseHold(holdId: string, actorId: string, idempotencyKey?: string): Promise<EscrowHoldView> {
     return withIdempotency(this.redis, `escrow-release:${holdId}`, idempotencyKey, async () =>
       this.db.withTransaction(async (c) => {
         const hold = await this.lockHold(c, holdId);
         if (hold.customer_id !== actorId) throw Errors.forbidden('Only the job customer can confirm completion and release escrow');
-        return toHold(await this.releaseHoldInTxn(c, hold, actorId));
+        return toHold(await this.releaseHoldInTxn(c, hold, actorId, actorId));
       }));
   }
 
-  /** Finance/super_admin release override (same ledger path as customer release). */
+  /** Finance/super_admin release override (same ledger path as customer release).
+   *  Batch 2 (§6a): unlike the customer path, the admin override does NOT
+   *  imply confirmation — it requires the job to be confirmed already
+   *  (by the customer, or by the auto-confirm sweep), else 409
+   *  COMPLETION_NOT_CONFIRMED. */
   async releaseHoldAsAdmin(holdId: string, adminId: string): Promise<EscrowHoldView> {
     return this.db.withTransaction(async (c) => {
       const hold = await this.lockHold(c, holdId);
-      return toHold(await this.releaseHoldInTxn(c, hold, adminId));
+      return toHold(await this.releaseHoldInTxn(c, hold, adminId, null));
     });
   }
 
@@ -341,11 +349,31 @@ export class EscrowService {
    * The single release path used by customer confirmation, admin override
    * and auto-release. Caller must hold the hold row FOR UPDATE inside a
    * transaction. Throws ESCROW_DISPUTE_OPEN when a dispute is open.
+   *
+   * Batch 2 (§6a) completion gate: when `confirmingCustomerId` is given
+   * (customer release), the release itself stamps the customer's
+   * completion confirmation in the same transaction. When it is null
+   * (admin override / auto-release), the job must already be confirmed —
+   * otherwise 409 COMPLETION_NOT_CONFIRMED and no money moves.
    */
-  private async releaseHoldInTxn(c: QueryClient, hold: Record<string, unknown>, releasedBy: string | null): Promise<Record<string, unknown>> {
+  private async releaseHoldInTxn(c: QueryClient, hold: Record<string, unknown>, releasedBy: string | null, confirmingCustomerId: string | null = null): Promise<Record<string, unknown>> {
     const jobId = String(hold.job_id);
     if (await this.hasOpenDispute(c, jobId)) {
       throw Errors.conflict('ESCROW_DISPUTE_OPEN', 'Escrow cannot be released while a dispute is open on this job');
+    }
+    if (confirmingCustomerId) {
+      await c.query(
+        `UPDATE jobs SET completion_confirmed_at=COALESCE(completion_confirmed_at, now()), completion_confirmed_by=COALESCE(completion_confirmed_by, $2), updated_at=now() WHERE id=$1 AND state='COMPLETED'`,
+        [jobId, confirmingCustomerId]);
+      await c.query(
+        `INSERT INTO job_events (job_id, from_state, to_state, actor_user_id, actor_role, payload) VALUES ($1,'COMPLETED','COMPLETED',$2,'customer',$3)`,
+        [jobId, confirmingCustomerId, JSON.stringify({ event: 'completion_confirmed', via: 'escrow_release' })]);
+    } else {
+      const job = (await c.query(
+        `SELECT completion_confirmed_at FROM jobs WHERE id=$1`, [jobId])).rows[0] as unknown as { completion_confirmed_at: string | null } | undefined;
+      if (!job?.completion_confirmed_at) {
+        throw Errors.conflict('COMPLETION_NOT_CONFIRMED', 'Escrow cannot be released until the customer confirms completion (or the auto-confirm window elapses)');
+      }
     }
     const amountPaisa = Number(hold.amount_paisa);
     const commission = Number(hold.commission_paisa);
@@ -398,14 +426,18 @@ export class EscrowService {
    * (reported, not released). Idempotent: re-running releases nothing
    * twice because released holds are no longer status='held'. Intended
    * to be called on a schedule by POST /admin/escrow/auto-release.
-   */
-  async releaseDueHolds(now: Date = new Date()): Promise<{ released: string[]; skipped_dispute: string[]; checked_at: string }> {
+   *
+   * Batch 2 (§6a): a due hold whose job the customer has NOT confirmed
+   * yet is also skipped (skipped_unconfirmed) — release waits for
+   * confirmation or the auto-confirm sweep, it never releases early. */
+  async releaseDueHolds(now: Date = new Date()): Promise<{ released: string[]; skipped_dispute: string[]; skipped_unconfirmed: string[]; checked_at: string }> {
     const due = (await this.db.query(
       `SELECT * FROM escrow_holds WHERE status='held' AND auto_release_at <= $1 ORDER BY auto_release_at ASC`,
       [now.toISOString()],
     )).rows;
     const released: string[] = [];
     const skipped: string[] = [];
+    const skippedUnconfirmed: string[] = [];
     for (const row of due) {
       const holdId = String(row.id);
       // Pure eligibility check first (cheap, no lock): dispute state may
@@ -427,10 +459,11 @@ export class EscrowService {
         // concurrent release: skip, do not fail the whole sweep.
         if (e instanceof Error && (e as { code?: string }).code === 'ESCROW_DISPUTE_OPEN') skipped.push(holdId);
         else if (e instanceof Error && (e as { code?: string }).code === 'ESCROW_NOT_HELD') continue;
+        else if (e instanceof Error && (e as { code?: string }).code === 'COMPLETION_NOT_CONFIRMED') skippedUnconfirmed.push(holdId);
         else throw e;
       }
     }
-    return { released, skipped_dispute: skipped, checked_at: now.toISOString() };
+    return { released, skipped_dispute: skipped, skipped_unconfirmed: skippedUnconfirmed, checked_at: now.toISOString() };
   }
 
   // ---- Provider payouts --------------------------------------------------

@@ -28,12 +28,17 @@ let phoneSeq = 0;
 const PHONE = (n: string) => `+92301${RUN}${n}${phoneSeq++}`;
 // Seeded by 0004_seed.sql.
 const CATEGORY_ID = '00000000-0000-4000-8000-0000b0000001'; // Book Binding
-// Only the migrations this piece depends on (0001–0009 + 0015).
+// Only the migrations this piece depends on (0001–0009 + 0015 + 0023).
+// 0023 is Batch 2: escrow release is gated on jobs.completion_confirmed_at
+// (customer release implies confirmation; admin/auto release requires it),
+// so the escrow tests need those columns even though this spec applies a
+// subset of migrations.
 const MIGRATIONS = [
   '0001_init.sql', '0002_requests_jobs.sql', '0003_money_trust.sql',
   '0004_seed.sql', '0005_phase2_payments.sql', '0006_phase2_ops.sql',
   '0007_revoke_refresh_families.sql', '0008_ledger_balance_guard.sql',
   '0009_stage3_fixes.sql', '0015_escrow_payouts.sql',
+  '0023_batch2_trust_safety.sql',
 ];
 
 maybeDescribe('escrow release + provider payouts (real DB + Redis)', () => {
@@ -194,6 +199,10 @@ maybeDescribe('escrow release + provider payouts (real DB + Redis)', () => {
     const holdA = await escrow.createHold(a.jobId, a.customerId);
     const holdB = await escrow.createHold(b.jobId, b.customerId);
     await admin.query(`UPDATE escrow_holds SET auto_release_at = now() - interval '1 hour' WHERE id IN ($1,$2)`, [holdA.id, holdB.id]);
+    // Batch 2 (§6a): auto-release waits for completion confirmation.
+    // Job A is confirmed (so it releases); job B is not — but its open
+    // dispute is checked first, so it is reported as skipped_dispute.
+    await admin.query(`UPDATE jobs SET completion_confirmed_at=now(), completion_confirmed_by=$2 WHERE id=$1`, [a.jobId, a.customerId]);
     await admin.query(
       `INSERT INTO disputes (job_id, opened_by, reason_code, status) VALUES ($1,$2,'not_done','open')`,
       [b.jobId, b.customerId],
@@ -201,6 +210,7 @@ maybeDescribe('escrow release + provider payouts (real DB + Redis)', () => {
     const out = await escrow.releaseDueHolds();
     expect(out.released).toContain(holdA.id);
     expect(out.skipped_dispute).toContain(holdB.id);
+    expect(out.skipped_unconfirmed ?? []).not.toContain(holdA.id);
     expect((await walletOf(a.providerUserId)).balance_paisa).toBe(540_000);
     const holdBRow = (await admin.query(`SELECT status FROM escrow_holds WHERE id=$1`, [holdB.id])).rows[0];
     expect(holdBRow.status).toBe('held');

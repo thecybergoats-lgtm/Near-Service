@@ -39,11 +39,17 @@ class _JobTrackingScreenState extends ConsumerState<JobTrackingScreen> {
   bool _trackingError = false;
   Timer? _pollTimer;
   DateTime? _lastLocationAt;
+  // Batch 2 (J1/J3): customer confirmation + no-show reporting.
+  bool _confirming = false;
+  bool _reportingNoShow = false;
+  bool _noShowReported = false;
+  String? _confirmError;
 
   @override
   void initState() {
     super.initState();
     _job = widget.initial;
+    _loadJob();
     _loadTracking();
     _pollTimer =
         Timer.periodic(const Duration(seconds: 15), (_) => _loadTracking());
@@ -59,8 +65,12 @@ class _JobTrackingScreenState extends ConsumerState<JobTrackingScreen> {
             state: (data['to'] ?? data['state'] ?? _job?.state ?? 'ACCEPTED')
                 .toString(),
             agreedPrice: _job?.agreedPrice ?? 0,
+            paymentMethod: _job?.paymentMethod ?? 'cash',
+            paymentStatus: _job?.paymentStatus ?? 'unpaid',
             providerName: _job?.providerName ?? '',
             providerId: _job?.providerId ?? '',
+            scheduledAt: _job?.scheduledAt,
+            completionConfirmedAt: _job?.completionConfirmedAt,
           );
         });
       }
@@ -99,6 +109,104 @@ class _JobTrackingScreenState extends ConsumerState<JobTrackingScreen> {
     _pollTimer?.cancel();
     ref.read(socketServiceProvider).leaveRoom('job:${widget.jobId}');
     super.dispose();
+  }
+
+  /// Batch 2: GET /jobs/:id carries scheduled_at and
+  /// completion_confirmed_at, which the tracking endpoint does not.
+  Future<void> _loadJob() async {
+    try {
+      final job = await ref.read(apiClientProvider).getJob(widget.jobId);
+      if (mounted) setState(() => _job = job);
+    } catch (_) {
+      // Tracking + the initial job (if any) still render.
+    }
+  }
+
+  /// Batch 2 (J1): customer confirms the work is done. Payment
+  /// settles only after this. 403 = not your job to confirm;
+  /// 409 = already confirmed / wrong state — plain words, not codes.
+  Future<void> _confirmCompletion() async {
+    setState(() {
+      _confirming = true;
+      _confirmError = null;
+    });
+    try {
+      final job =
+          await ref.read(apiClientProvider).confirmCompletion(widget.jobId);
+      if (mounted) {
+        setState(() => _job = job);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Confirmed — payment can now settle. Thank you!')),
+        );
+      }
+    } on ApiException catch (e) {
+      setState(() => _confirmError = e.statusCode == 403
+          ? 'Only the customer on this job can confirm completion.'
+          : e.statusCode == 409
+              ? 'This job is already confirmed, or is not ready to confirm yet.'
+              : e.userMessage);
+    } finally {
+      if (mounted) setState(() => _confirming = false);
+    }
+  }
+
+  /// Batch 2 (J3): the committed time passed without arrival.
+  Future<void> _reportNoShow() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Provider nahi aaya?'),
+        content: const Text(
+            'Report that the provider did not arrive at the committed time. Support will follow up — this does not cancel the job by itself.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Report karo',
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    setState(() => _reportingNoShow = true);
+    try {
+      await ref.read(apiClientProvider).reportNoShow(widget.jobId);
+      if (mounted) {
+        setState(() => _noShowReported = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Reported — support will follow up with the provider.')),
+        );
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.userMessage)));
+      }
+    } finally {
+      if (mounted) setState(() => _reportingNoShow = false);
+    }
+  }
+
+  /// Countdown/reminder text for the committed arrival time.
+  String? _scheduledText(DateTime scheduledAt) {
+    final now = DateTime.now();
+    final diff = scheduledAt.difference(now);
+    final timeStr = scheduledAt.toLocal().toString().substring(0, 16);
+    if (diff.isNegative) {
+      final late = now.difference(scheduledAt);
+      final mins = late.inMinutes;
+      return 'Committed time was $timeStr — ${mins < 60 ? '$mins min overdue' : '${mins ~/ 60}h ${mins % 60}m overdue'}';
+    }
+    if (diff.inMinutes < 60) {
+      return 'Provider aane ka waqt: $timeStr (in ~${diff.inMinutes} min)';
+    }
+    if (diff.inHours < 24) {
+      return 'Provider aane ka waqt: $timeStr (in ~${diff.inHours}h ${diff.inMinutes % 60}m)';
+    }
+    return 'Provider aane ka waqt: $timeStr';
   }
 
   Future<void> _loadTracking() async {
@@ -293,6 +401,111 @@ class _JobTrackingScreenState extends ConsumerState<JobTrackingScreen> {
             ),
           ),
           const SizedBox(height: 16),
+          // Batch 2 (J3) — committed arrival time + countdown/reminder.
+          if (job?.scheduledAt != null)
+            Card(
+              color: const Color(0xFF0F766E).withOpacity(0.08),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    const Icon(Icons.schedule,
+                        color: Color(0xFF0F766E)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _scheduledText(job!.scheduledAt!) ?? '',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (job?.scheduledAt != null) const SizedBox(height: 16),
+          // Batch 2 (J1) — customer confirmation. Payment settles only
+          // after this; until then the payment button stays hidden.
+          if (state == 'COMPLETED' && job?.completionConfirmedAt == null) ...[
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Kaam ho gaya?',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 16)),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Provider ne kaam mukammal kar diya hai. Confirm karein ke kaam theek hua — payment settles only after you confirm.',
+                      style: TextStyle(color: Colors.grey, fontSize: 13),
+                    ),
+                    if (_confirmError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(_confirmError!,
+                          style: const TextStyle(color: Colors.red)),
+                    ],
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed:
+                            _confirming ? null : _confirmCompletion,
+                        child: Text(_confirming
+                            ? 'Confirming…'
+                            : 'Confirm karo — kaam ho gaya'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          if (state == 'COMPLETED' && job?.completionConfirmedAt != null)
+            const Card(
+              child: ListTile(
+                leading:
+                    Icon(Icons.check_circle, color: Color(0xFF15803D)),
+                title: Text('Completion confirmed'),
+                subtitle: Text('You confirmed the work is done.'),
+              ),
+            ),
+          if (state == 'COMPLETED' && job?.completionConfirmedAt != null)
+            const SizedBox(height: 16),
+          // Batch 2 (J3) — committed time passed without arrival.
+          if (job?.scheduledAt != null &&
+              job!.scheduledAt!.isBefore(DateTime.now()) &&
+              !_noShowReported &&
+              (state == 'ACCEPTED' ||
+                  state == 'PROVIDER_EN_ROUTE' ||
+                  state == 'ARRIVED' ||
+                  state == 'IN_PROGRESS')) ...[
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed:
+                    _reportingNoShow ? null : _reportNoShow,
+                icon: const Icon(Icons.report_problem_outlined,
+                    color: Colors.red),
+                label: Text(_reportingNoShow
+                    ? 'Reporting…'
+                    : 'Provider nahi aaya? Report karo'),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          if (_noShowReported)
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.report_problem_outlined,
+                    color: Color(0xFFD97706)),
+                title: Text('No-show reported'),
+                subtitle:
+                    Text('Support will follow up with the provider.'),
+              ),
+            ),
+          if (_noShowReported) const SizedBox(height: 16),
           SizedBox(
             height: 220,
             child: ClipRRect(
@@ -402,6 +615,12 @@ class _JobTrackingScreenState extends ConsumerState<JobTrackingScreen> {
             ],
           ),
           const SizedBox(height: 12),
+          // Batch 2 (J1): the confirm card above is the primary action
+          // on a COMPLETED job — payment settles only after
+          // confirmation (enforced server-side). The payment button
+          // stays visible so payment is never stranded if the
+          // confirmation endpoint is unreachable; the payment screen
+          // itself is settled by the backend only after confirmation.
           if (state == 'COMPLETED')
             SizedBox(
               width: double.infinity,

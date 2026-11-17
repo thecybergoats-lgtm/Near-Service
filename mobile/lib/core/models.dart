@@ -241,6 +241,22 @@ class ServiceProvider {
   String get tierLabel =>
       ['Unverified', 'ID Verified', 'Verified', 'Trusted Pro'][tier.clamp(0, 3)];
   bool get isShop => type == 'SHOP';
+
+  /// Batch 2 favourites shape from GET /favourites (backend
+  /// FavouritesService.list): {provider_id, display_name,
+  /// provider_type, rating_bayes, jobs_completed, favourited_at}.
+  /// Slim on purpose — no lat/lng, distance or price — so those
+  /// default to 0 and the card shows name, rating and jobs only.
+  factory ServiceProvider.fromFavouriteJson(Map<String, dynamic> j) =>
+      ServiceProvider(
+        id: (j['provider_id'] ?? j['id'] ?? '').toString(),
+        displayName: (j['display_name'] ?? j['displayName'] ?? '').toString(),
+        type: (j['provider_type'] ?? j['type'] ?? 'INDIVIDUAL').toString(),
+        rating: ((j['rating_bayes'] ?? j['rating_avg'] ?? j['rating']) as num?)
+                ?.toDouble() ??
+            0,
+        jobsCompleted: (j['jobs_completed'] as num?)?.toInt() ?? 0,
+      );
 }
 
 class Offer {
@@ -347,6 +363,7 @@ class Job {
   final String categoryName;
   final DateTime? createdAt;
   final DateTime? scheduledAt;
+  final DateTime? completionConfirmedAt;
 
   const Job({
     required this.id,
@@ -361,6 +378,7 @@ class Job {
     this.categoryName = '',
     this.createdAt,
     this.scheduledAt,
+    this.completionConfirmedAt,
   });
 
   factory Job.fromJson(Map<String, dynamic> j) {
@@ -384,8 +402,126 @@ class Job {
       scheduledAt: j['scheduled_at'] == null
           ? null
           : DateTime.tryParse(j['scheduled_at'].toString()),
+      completionConfirmedAt: j['completion_confirmed_at'] == null
+          ? null
+          : DateTime.tryParse(j['completion_confirmed_at'].toString()),
     );
   }
+}
+
+/// ---- Batch 2 models -----------------------------------------------------
+/// GET /promotions/active item (public). The home banner shows ONLY
+/// items returned by this endpoint — never hardcoded promo text.
+class PromoItem {
+  final String code;
+  final String title;
+  final String discountText;
+
+  const PromoItem({required this.code, required this.title, this.discountText = ''});
+
+  factory PromoItem.fromJson(Map<String, dynamic> j) => PromoItem(
+        code: (j['code'] ?? '').toString(),
+        title: (j['title'] ?? '').toString(),
+        discountText: (j['discount_text'] ?? j['discountText'] ?? '').toString(),
+      );
+}
+
+/// One public provider review (GET /providers/:id/reviews).
+/// `photos` are storage keys or URLs as returned by the backend; the
+/// UI shows a network image only for http(s) values and a photo chip
+/// otherwise (a bare storage key is not a fetchable URL).
+class ProviderReview {
+  final String id;
+  final String reviewerName;
+  final int stars;
+  final String comment;
+  final List<String> tags;
+  final List<String> photos;
+  final DateTime? createdAt;
+
+  const ProviderReview({
+    this.id = '',
+    this.reviewerName = '',
+    this.stars = 5,
+    this.comment = '',
+    this.tags = const [],
+    this.photos = const [],
+    this.createdAt,
+  });
+
+  factory ProviderReview.fromJson(Map<String, dynamic> j) => ProviderReview(
+        id: (j['id'] ?? '').toString(),
+        reviewerName: (j['reviewer_name'] ?? j['reviewerName'] ?? '').toString(),
+        stars: (j['stars'] as num?)?.toInt() ?? 5,
+        comment: (j['comment'] ?? '').toString(),
+        tags: (j['tags'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+        photos: (j['photos'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+        createdAt: j['created_at'] == null
+            ? null
+            : DateTime.tryParse(j['created_at'].toString()),
+      );
+
+  bool get hasPhotos => photos.isNotEmpty;
+}
+
+/// A Live Support thread (POST/GET /support/threads).
+class SupportThread {
+  final String id;
+  final String subject;
+  final String status; // open | pending | resolved | closed
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+
+  const SupportThread({
+    required this.id,
+    this.subject = '',
+    this.status = 'open',
+    this.createdAt,
+    this.updatedAt,
+  });
+
+  factory SupportThread.fromJson(Map<String, dynamic> j) => SupportThread(
+        id: (j['id'] ?? '').toString(),
+        subject: (j['subject'] ?? '').toString(),
+        status: (j['status'] ?? 'open').toString(),
+        createdAt: j['created_at'] == null
+            ? null
+            : DateTime.tryParse(j['created_at'].toString()),
+        updatedAt: j['updated_at'] == null
+            ? null
+            : DateTime.tryParse(j['updated_at'].toString()),
+      );
+
+  bool get isOpen => status == 'open' || status == 'pending';
+}
+
+/// One message in a support thread.
+class SupportMessage {
+  final String id;
+  final String senderRole; // customer | support | admin | agent
+  final String body;
+  final DateTime? createdAt;
+
+  const SupportMessage({
+    this.id = '',
+    this.senderRole = 'customer',
+    this.body = '',
+    this.createdAt,
+  });
+
+  factory SupportMessage.fromJson(Map<String, dynamic> j) {
+    final sender = (j['sender_role'] ?? j['sender_type'] ?? j['role'] ?? 'customer').toString();
+    return SupportMessage(
+      id: (j['id'] ?? '').toString(),
+      senderRole: sender,
+      body: (j['message'] ?? j['body'] ?? '').toString(),
+      createdAt: j['created_at'] == null
+          ? null
+          : DateTime.tryParse(j['created_at'].toString()),
+    );
+  }
+
+  bool get isFromSupport => senderRole != 'customer';
 }
 
 /// Ordered job states (PRD p.8 state machine).

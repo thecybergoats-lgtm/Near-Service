@@ -238,7 +238,7 @@ export class ProvidersService {
     const p = (await this.db.query(`SELECT * FROM provider_profiles WHERE id=$1 AND deleted_at IS NULL`, [id])).rows[0];
     if (!p) throw Errors.notFound('Provider');
     const services = (await this.db.query(`SELECT c.id, c.slug, c.name_en, ps.starting_price FROM provider_services ps JOIN categories c ON c.id=ps.category_id WHERE ps.provider_id=$1 AND ps.is_active`, [id])).rows;
-    const reviews = (await this.db.query(`SELECT stars, comment, created_at FROM reviews WHERE reviewee_id=(SELECT user_id FROM provider_profiles WHERE id=$1) AND NOT is_held ORDER BY created_at DESC LIMIT 20`, [id])).rows;
+    const reviews = (await this.db.query(`SELECT stars, comment, photos, created_at FROM reviews WHERE reviewee_id=(SELECT user_id FROM provider_profiles WHERE id=$1) AND NOT is_held ORDER BY created_at DESC LIMIT 20`, [id])).rows;
     // FIX 11: same computed open-now as nearby() — is_online alone is not
     // "open" (holiday with the app left on).
     const arows = (await this.db.query<{ weekday: number; opens: string | null; closes: string | null; is_day_off: boolean }>(
@@ -423,7 +423,7 @@ export class ProvidersService {
     const profile = (await this.db.query<{ user_id: string }>(`SELECT user_id FROM provider_profiles WHERE id=$1 AND deleted_at IS NULL`, [providerId])).rows[0];
     if (!profile) throw Errors.notFound('Provider');
     const rows = (await this.db.query(
-      `SELECT r.id, r.job_id, u.full_name AS reviewer_name, r.stars, r.comment, r.tags, r.created_at
+      `SELECT r.id, r.job_id, u.full_name AS reviewer_name, r.stars, r.comment, r.tags, r.photos, r.created_at
        FROM reviews r JOIN users u ON u.id=r.reviewer_id
        WHERE r.reviewee_id=$1 AND NOT r.is_held
          AND ($2::text IS NULL OR (r.created_at, r.id) < (SELECT created_at, id FROM reviews WHERE id=$2::uuid))
@@ -431,6 +431,6 @@ export class ProvidersService {
       [profile.user_id, cursor ?? null, lim + 1])).rows;
     const hasMore = rows.length > lim;
     const page = hasMore ? rows.slice(0, lim) : rows;
-    return { items: page, next_cursor: hasMore ? String(page[page.length - 1].id) : null };
+    return { items: page.map((r) => ({ ...r, photos: (r as Record<string, unknown>).photos ?? [] })), next_cursor: hasMore ? String(page[page.length - 1].id) : null };
   }
 }

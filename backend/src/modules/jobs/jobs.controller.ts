@@ -35,6 +35,9 @@ export class ReviewDto {
   @IsInt() @Min(1) @Max(5) stars!: number;
   @IsOptional() @IsArray() @ArrayMaxSize(10) @IsString({ each: true }) @MaxLength(40, { each: true }) tags?: string[];
   @IsOptional() @IsString() @MaxLength(1000) comment?: string;
+  // Batch 2 (§2): up to 3 photo storage keys, each issued for this job by
+  // POST /jobs/:id/reviews/upload-request (dispute-evidence pattern).
+  @IsOptional() @IsArray() @ArrayMaxSize(3) @IsString({ each: true }) @MaxLength(500, { each: true }) photo_keys?: string[];
 }
 export class RescheduleDto {
   @IsDateString() scheduled_at!: string;
@@ -73,8 +76,16 @@ export class JobsController {
   @Post('jobs/:id/adjustments') adjustments(@CurrentUser() u: AuthUser, @Param('id', uuidParamPipe) id: string, @Body() dto: AdjustmentDto, @Headers('idempotency-key') key?: string) { return this.svc.createAdjustment(id, u.id, dto.items, dto.reason, key); }
   @Post('adjustments/:id/decide') @HttpCode(200) decide(@CurrentUser() u: AuthUser, @Param('id', uuidParamPipe) id: string, @Body() dto: DecideDto) { return this.svc.decideAdjustment(id, u.id, dto.approve); }
   @Post('jobs/:id/complete') @HttpCode(200) complete(@CurrentUser() u: AuthUser, @Param('id', uuidParamPipe) id: string) { return this.svc.complete(id, u.id); }
+  /** Batch 2 (§6a): the customer confirms the completed work. Provider
+   *  calling it -> 403; double-confirm -> 409; not COMPLETED -> 409. */
+  @Post('jobs/:id/confirm-completion') @HttpCode(200) confirmCompletion(@CurrentUser() u: AuthUser, @Param('id', uuidParamPipe) id: string) { return this.svc.confirmCompletion(id, u.id); }
+  /** Batch 2 (§6b): the customer reports the provider did not show up at
+   *  the committed pickup time (only after scheduled_at has passed). */
+  @Post('jobs/:id/report-no-show') @HttpCode(200) reportNoShow(@CurrentUser() u: AuthUser, @Param('id', uuidParamPipe) id: string) { return this.svc.reportNoShow(id, u.id); }
   @Post('jobs/:id/confirm-payment') @HttpCode(200) confirmPayment(@CurrentUser() u: AuthUser, @Param('id', uuidParamPipe) id: string, @Headers('idempotency-key') key?: string) { return this.svc.confirmPayment(id, u.id, key); }
-  @Post('jobs/:id/reviews') review(@CurrentUser() u: AuthUser, @Param('id', uuidParamPipe) id: string, @Body() dto: ReviewDto) { return this.svc.review(id, u.id, dto.stars, dto.tags, dto.comment); }
+  /** Batch 2 (§2): request a signed-URL upload slot for one review photo. */
+  @Post('jobs/:id/reviews/upload-request') @HttpCode(200) requestReviewUpload(@CurrentUser() u: AuthUser, @Param('id', uuidParamPipe) id: string) { return this.svc.requestReviewUpload(id, u.id); }
+  @Post('jobs/:id/reviews') review(@CurrentUser() u: AuthUser, @Param('id', uuidParamPipe) id: string, @Body() dto: ReviewDto) { return this.svc.review(id, u.id, dto.stars, dto.tags, dto.comment, dto.photo_keys); }
   // ---- Phase 2: job queries, reschedule, tracking, recurring jobs ----
   @Get('jobs') listJobs(@CurrentUser() u: AuthUser, @Query() q: ListJobsQueryDto) {
     return this.query.listJobs(u.id, q.role, q.state, q.cursor, q.limit ?? 20);
@@ -108,5 +119,13 @@ export class JobsController {
    *  same pattern as run-due above. Idempotent: a re-run closes nothing. */
   @Roles('super_admin', 'city_manager') @Post('admin/jobs/close-review-windows') @HttpCode(200) closeReviewWindows() {
     return this.svc.closeReviewWindows(new Date());
+  }
+  /** Cron entry point (Batch 2 §6a): auto-confirm completions — every
+   *  COMPLETED job older than the confirm window (feature_flags
+   *  `completion_confirm_window_hours`, default 48) that the customer has
+   *  not confirmed is confirmed by 'system'. Same pattern as
+   *  close-review-windows above. Idempotent: a re-run confirms nothing. */
+  @Roles('super_admin', 'city_manager') @Post('admin/jobs/auto-confirm-completions') @HttpCode(200) autoConfirmCompletions() {
+    return this.svc.autoConfirmCompletions(new Date());
   }
 }

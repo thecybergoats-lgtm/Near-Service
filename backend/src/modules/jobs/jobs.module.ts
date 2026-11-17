@@ -6,8 +6,9 @@ import { JobsController } from './jobs.controller';
 import { RealtimeModule } from '../../realtime/realtime.module';
 import { RequestsModule } from '../requests/requests.module';
 import { WarrantyModule } from '../warranty/warranty.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 @Module({
-  imports: [RealtimeModule, RequestsModule, WarrantyModule],
+  imports: [RealtimeModule, RequestsModule, WarrantyModule, NotificationsModule],
   controllers: [JobsController],
   providers: [JobsService, JobsQueryService, SchedulingService],
   exports: [JobsService, JobsQueryService, SchedulingService],

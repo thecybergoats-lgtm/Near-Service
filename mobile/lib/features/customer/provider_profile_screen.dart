@@ -9,6 +9,7 @@ import '../../core/models.dart';
 import '../../core/money.dart';
 import '../common/widgets.dart';
 import '../warranty/warranty_widgets.dart';
+import 'favorites_screen.dart';
 
 /// Provider profile (PRD p.22): services + starting prices, reviews,
 /// badges, Request quote / Call / Chat. Call is masked in production;
@@ -29,6 +30,9 @@ class _ProviderProfileScreenState extends ConsumerState<ProviderProfileScreen> {
   // Phase 4 (item 4): 7-day warranty badge — Tier 3 only, hidden otherwise.
   bool _warrantyEligible = false;
   int _warrantyDays = 7;
+  // Batch 2: public reviews (with photo thumbnails) + favourite heart.
+  List<ProviderReview> _reviews = [];
+  bool _reviewsFailed = false;
 
   @override
   void initState() {
@@ -38,6 +42,7 @@ class _ProviderProfileScreenState extends ConsumerState<ProviderProfileScreen> {
   }
 
   Future<void> _load() async {
+    await loadFavoriteIds(ref);
     try {
       _provider = await ref.read(apiClientProvider).getProvider(widget.providerId);
     } catch (_) {
@@ -45,6 +50,17 @@ class _ProviderProfileScreenState extends ConsumerState<ProviderProfileScreen> {
         (p) => p.id == widget.providerId,
         orElse: () => DemoData.providers.first,
       );
+    }
+    // Batch 2 — public reviews; a failed load hides the list, never
+    // the profile. Photos render only for http(s) URLs; bare storage
+    // keys show as a photo chip (a key is not a fetchable URL).
+    try {
+      final page =
+          await ref.read(apiClientProvider).getProviderReviews(widget.providerId);
+      _reviews = page.items;
+    } catch (_) {
+      _reviews = [];
+      _reviewsFailed = true;
     }
     // Best-effort: a failed badge lookup hides the badge, never the profile.
     try {
@@ -138,10 +154,19 @@ class _ProviderProfileScreenState extends ConsumerState<ProviderProfileScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final provider = p!;
+    final isFav = ref.watch(favoriteIdsProvider).contains(provider.id);
     return Scaffold(
       appBar: AppBar(
         title: Text(provider.name),
         actions: [
+          IconButton(
+            icon: Icon(
+              isFav ? Icons.favorite : Icons.favorite_border,
+              color: isFav ? Colors.red : null,
+            ),
+            tooltip: isFav ? 'Remove from favourites' : 'Save to favourites',
+            onPressed: () => toggleFavorite(ref, provider.id),
+          ),
           PopupMenuButton<String>(
             tooltip: 'More',
             onSelected: (v) {
@@ -225,13 +250,96 @@ class _ProviderProfileScreenState extends ConsumerState<ProviderProfileScreen> {
           const SizedBox(height: 16),
           const Text('Reviews', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
           const SizedBox(height: 8),
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.star, color: Color(0xFFD97706)),
-              title: Text('Reviews appear here after completed, paid jobs.'),
-              subtitle: Text('Only customers with a settled job can review.'),
-            ),
-          ),
+          if (_reviewsFailed)
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.star, color: Color(0xFFD97706)),
+                title: Text('Reviews could not be loaded.'),
+                subtitle: Text('Check your connection and try again.'),
+              ),
+            )
+          else if (_reviews.isEmpty)
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.star, color: Color(0xFFD97706)),
+                title: Text('Reviews appear here after completed, paid jobs.'),
+                subtitle: Text('Only customers with a settled job can review.'),
+              ),
+            )
+          else
+            ..._reviews.map((r) => Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            ...List.generate(
+                                5,
+                                (i) => Icon(
+                                      i < r.stars
+                                          ? Icons.star
+                                          : Icons.star_border,
+                                      size: 16,
+                                      color: const Color(0xFFD97706),
+                                    )),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                r.reviewerName.isNotEmpty
+                                    ? r.reviewerName
+                                    : 'Customer',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (r.comment.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(r.comment),
+                        ],
+                        if (r.hasPhotos) ...[
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            height: 72,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: r.photos.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 8),
+                              itemBuilder: (_, i) {
+                                final url = ApiClient.photoDisplayUrl(
+                                    r.photos[i]);
+                                if (url == null) {
+                                  return const Chip(
+                                    avatar: Icon(Icons.photo, size: 16),
+                                    label: Text('Photo'),
+                                  );
+                                }
+                                return ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(
+                                    url,
+                                    width: 72,
+                                    height: 72,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) =>
+                                        const Chip(
+                                            avatar:
+                                                Icon(Icons.photo, size: 16),
+                                            label: Text('Photo')),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                )),
           const SizedBox(height: 24),
           Row(
             children: [

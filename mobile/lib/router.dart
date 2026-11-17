@@ -27,6 +27,7 @@ import 'features/customer/rating_screen.dart';
 import 'features/customer/request_form_screen.dart';
 import 'features/customer/search_screen.dart';
 import 'features/customer/settings_screen.dart';
+import 'features/customer/support_screen.dart';
 import 'features/customer/trusted_contacts_screen.dart';
 import 'features/customer/wallet_screen.dart';
 import 'features/search/search_metrics_screen.dart';
@@ -58,7 +59,13 @@ GoRouter buildRouter() {
       GoRoute(path: '/auth/role', builder: (_, __) => const RoleScreen()),
       // Customer
       GoRoute(path: '/customer/home', builder: (_, __) => const HomeScreen()),
-      GoRoute(path: '/customer/search', builder: (_, __) => const SearchScreen()),
+      GoRoute(
+        path: '/customer/search',
+        builder: (_, state) => SearchScreen(
+          autoListen:
+              (state.extra as Map?)?['autoListen'] as bool? ?? false,
+        ),
+      ),
       GoRoute(path: '/customer/categories', builder: (_, __) => const CategoryScreen()),
       GoRoute(
         path: '/customer/providers',
@@ -80,6 +87,8 @@ GoRouter buildRouter() {
           return RequestFormScreen(
             categoryId: extra['categoryId'] as String?,
             categorySlug: extra['categorySlug'] as String?,
+            initialOffer: extra['initialOffer'] as int?,
+            initialDescription: extra['initialDescription'] as String?,
           );
         },
       ),
@@ -141,6 +150,15 @@ GoRouter buildRouter() {
         ),
       ),
       GoRoute(path: '/customer/settings', builder: (_, __) => const SettingsScreen()),
+      // Batch 2 — Live Support: thread list + one thread.
+      GoRoute(path: '/customer/support', builder: (_, __) => const SupportScreen()),
+      GoRoute(
+        path: '/customer/support/:id',
+        builder: (_, state) => SupportThreadScreen(
+          threadId: state.pathParameters['id'] ?? '',
+          subject: (state.extra as Map?)?['subject'] as String?,
+        ),
+      ),
       // FIX 10 — trusted contacts (SOS needs at least one).
       GoRoute(path: '/customer/trusted-contacts', builder: (_, __) => const TrustedContactsScreen()),
       // Provider

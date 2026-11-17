@@ -268,6 +268,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.peerName),
@@ -305,7 +306,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: const Color(0xFFF1F5F9),
+            color: scheme.surfaceContainerHighest,
             child: const Text(
               'Stay in the app: off-platform contact sharing loses payment protection and dispute support.',
               style: TextStyle(fontSize: 12, color: Colors.grey),
@@ -329,11 +330,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                               constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                               decoration: BoxDecoration(
-                                color: m.isMine ? const Color(0xFF0F766E) : const Color(0xFFF1F5F9),
+                                color: m.isMine ? const Color(0xFF0F766E) : scheme.surfaceContainerHighest,
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               child: Text(m.body,
-                                  style: TextStyle(color: m.isMine ? Colors.white : Colors.black87)),
+                                  style: TextStyle(color: m.isMine ? Colors.white : null)),
                             ),
                           );
                         },

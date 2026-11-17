@@ -53,7 +53,7 @@ class _ActiveJobScreenState extends ConsumerState<ActiveJobScreen> {
     'ACCEPTED': "I'm on my way",
     'PROVIDER_EN_ROUTE': "I've arrived",
     'ARRIVED': 'Start work',
-    'IN_PROGRESS': 'Mark completed',
+    'IN_PROGRESS': 'Kaam ho gaya',
   };
 
   @override
@@ -142,7 +142,12 @@ class _ActiveJobScreenState extends ConsumerState<ActiveJobScreen> {
     if (next == null) return;
     setState(() => _busy = true);
     try {
-      final job = await ref.read(apiClientProvider).transitionJob(widget.jobId, next);
+      // Batch 2 (J1): marking the work done uses the provider-only
+      // POST /jobs/:id/complete ("Kaam ho gaya") — not the generic
+      // transition. The customer's confirmation is a separate call.
+      final job = next == 'COMPLETED'
+          ? await ref.read(apiClientProvider).completeJob(widget.jobId)
+          : await ref.read(apiClientProvider).transitionJob(widget.jobId, next);
       _applyState(job.state);
     } on ApiException catch (e) {
       // Demo job id has no backend job — advance locally so the flow is demonstrable.
@@ -255,7 +260,6 @@ class _ActiveJobScreenState extends ConsumerState<ActiveJobScreen> {
           if (_state == 'COMPLETED') ...[
             const SizedBox(height: 12),
             Card(
-              color: const Color(0xFFF1F5F9),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -265,7 +269,7 @@ class _ActiveJobScreenState extends ConsumerState<ActiveJobScreen> {
                         style: TextStyle(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 4),
                     const Text(
-                      'Ask the customer to confirm payment in their app. Commission (default 10%) is recorded against your wallet.',
+                      'The customer confirms completion in their app ("Confirm karo") — payment settles only after their confirmation. Commission (default 10%) is recorded against your wallet.',
                       style: TextStyle(color: Colors.grey, fontSize: 13),
                     ),
                     const SizedBox(height: 12),

@@ -61,6 +61,8 @@
 	<string>Near Service uses the camera for provider verification (selfie + CNIC photo) and for photos of the problem.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Near Service uses the microphone for voice search on your phone.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Near Service uses speech recognition to turn your spoken service request into a search.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Near Service uses your photo library so you can attach a photo of the problem to a request.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

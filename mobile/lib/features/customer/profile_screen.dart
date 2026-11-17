@@ -196,6 +196,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           onTap: () => context.push('/customer/history'),
         ),
         ListTile(
+          leading: const Icon(Icons.favorite_border),
+          title: const Text('Favourites'),
+          subtitle: const Text('Saved providers — book them again in one tap'),
+          onTap: () => context.push('/customer/favorites'),
+        ),
+        ListTile(
+          leading: const Icon(Icons.headset_mic_outlined),
+          title: const Text('Live Support'),
+          subtitle: const Text('Support will reply soon'),
+          onTap: () => context.push('/customer/support'),
+        ),
+        ListTile(
           leading: const Icon(Icons.account_balance_wallet),
           title: const Text('Wallet'),
           onTap: () => context.push('/customer/wallet'),

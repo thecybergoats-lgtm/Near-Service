@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/api_client.dart';
+import '../../core/demo_data.dart';
 import '../../core/errors.dart';
 import '../../core/models.dart';
 import '../../core/money.dart';
@@ -196,6 +197,33 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
 }
 
+/// Batch 2 "Book again": pre-fills the request form with the same
+/// category, the same agreed price, and a description naming the
+/// provider. The request contract has no provider_id field, so the
+/// provider cannot be pinned — the description tells the customer
+/// who did it last time.
+Map<String, dynamic> _rebookExtra(Job job) {
+  String? slug;
+  for (final c in DemoData.categories) {
+    if (c.nameEn.toLowerCase() == job.categoryName.toLowerCase()) {
+      slug = c.slug;
+      break;
+    }
+  }
+  slug ??= job.categoryName
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-|-$'), '');
+  if (slug.isEmpty) slug = 'book-binding';
+  return {
+    'categorySlug': slug,
+    'initialOffer': job.agreedPrice,
+    'initialDescription':
+        'Same as before: ${job.categoryName.isNotEmpty ? job.categoryName : 'service'}'
+        '${job.providerName.isNotEmpty ? ' by ${job.providerName}' : ''}.',
+  };
+}
+
 class _JobCard extends StatelessWidget {
   const _JobCard({required this.job, required this.role});
 
@@ -281,8 +309,11 @@ class _JobCard extends StatelessWidget {
                   child: const Text('Dispute'),
                 ),
                 OutlinedButton(
-                  onPressed: () => context.push('/customer/request'),
-                  child: const Text('Rebook'),
+                  onPressed: () => context.push(
+                    '/customer/request',
+                    extra: _rebookExtra(job),
+                  ),
+                  child: const Text('Book again'),
                 ),
               ],
             ),

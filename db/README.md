@@ -26,6 +26,7 @@ PostgreSQL 15 + PostGIS + pg_trgm. Migrations are numbered SQL files, applied in
 | `0020_partners.sql` | Phase 4 partner integrations: `partners`, `partner_catalog_items`, `partner_orders`, `partner_order_items`, affiliate fee ledger wiring |
 | `0021_fix_seed_uuids.sql` | Fix A: rewrites the 35 seeded version-0 category/city ids (0004/0018) to RFC-4122 v4 UUIDs and every reference to them (FKs dropped + re-added with original definitions, all uuid columns swept); idempotent no-op on a fresh DB, which seeds the v4 ids directly |
 | `0022_fix_rated_state.sql` | Fix B: `review_window_days` flag (default 7 days) + partial index for the review-window closing sweep; see docs/phase4-api-addendum.md §10 |
+| `0023_batch2_trust_safety.sql` | Batch 2: `user_favourites`, `support_threads` + `support_messages`, `reviews.photos`, `users.push_enabled`, `jobs.completion_confirmed_at`/`completion_confirmed_by`, `provider_profiles.no_show_count`, `completion_confirm_window_hours` flag (default 48h) + partial index for the auto-confirm sweep; see docs/batch2-api-addendum.md |
 
 
 **Timeline (v1.1): 16–20 weeks to the Quetta pilot for 1 Flutter + 1 backend dev**
