@@ -60,44 +60,44 @@ class DemoData {
     ),
   ];
 
-  static const List<Provider> providers = [
-    Provider(
+  static const List<ServiceProvider> providers = [
+    ServiceProvider(
       id: 'demo-p1', displayName: 'Ahmed Book Binding', shopName: 'Ahmed Book Binding House',
       type: 'SHOP', tier: 2, rating: 4.8, ratingCount: 214, jobsCompleted: 312,
       distanceKm: 0.8, etaMinutes: 10, startingPrice: 150, responseSecondsAvg: 45,
       lat: 30.1820, lng: 66.9720, bio: 'Hard & soft binding, thesis binding. 12 years in Satellite Town.',
     ),
-    Provider(
+    ServiceProvider(
       id: 'demo-p2', displayName: 'Bilal Ahmed', shopName: 'Bilal Cool Air Services',
       type: 'SHOP', tier: 2, rating: 4.7, ratingCount: 186, jobsCompleted: 268,
       distanceKm: 1.4, etaMinutes: 15, startingPrice: 800, responseSecondsAvg: 60,
       lat: 30.1760, lng: 66.9800, bio: 'Split & window AC — gas refill, service, installation.',
     ),
-    Provider(
+    ServiceProvider(
       id: 'demo-p3', displayName: 'Muhammad Aslam', type: 'INDIVIDUAL',
       tier: 1, rating: 4.6, ratingCount: 98, jobsCompleted: 141,
       distanceKm: 2.1, etaMinutes: 20, startingPrice: 500, responseSecondsAvg: 90,
       lat: 30.1900, lng: 66.9650, bio: 'House wiring, fans, switches, UPS fitting.',
     ),
-    Provider(
+    ServiceProvider(
       id: 'demo-p4', displayName: 'Naseer Khan', shopName: 'Naseer Sanitary Store',
       type: 'SHOP', tier: 3, rating: 4.9, ratingCount: 320, jobsCompleted: 540,
       distanceKm: 2.8, etaMinutes: 25, startingPrice: 400, responseSecondsAvg: 40,
       lat: 30.1700, lng: 66.9900, bio: 'Leak repair, fitting, motor & tank work. Trusted Pro.',
     ),
-    Provider(
+    ServiceProvider(
       id: 'demo-p5', displayName: 'Usman Ghani', shopName: 'Usman Mobile Lab',
       type: 'SHOP', tier: 1, rating: 4.5, ratingCount: 167, jobsCompleted: 203,
       distanceKm: 1.1, etaMinutes: 12, startingPrice: 300, responseSecondsAvg: 55,
       lat: 30.1850, lng: 66.9780, bio: 'Screen, battery, charging port, software. All brands.',
     ),
-    Provider(
+    ServiceProvider(
       id: 'demo-p6', displayName: 'Abdul Rehman', type: 'INDIVIDUAL',
       tier: 1, rating: 4.4, ratingCount: 76, jobsCompleted: 112,
       distanceKm: 3.5, etaMinutes: 30, startingPrice: 700, responseSecondsAvg: 120,
       lat: 30.1600, lng: 66.9600, bio: 'AC service & gas refill, home visits across Quetta.',
     ),
-    Provider(
+    ServiceProvider(
       id: 'demo-p7', displayName: 'Haji Karim Book Depot', shopName: 'Karim Book Binding',
       type: 'SHOP', tier: 2, rating: 4.7, ratingCount: 143, jobsCompleted: 198,
       distanceKm: 4.2, etaMinutes: 35, startingPrice: 120, responseSecondsAvg: 75,

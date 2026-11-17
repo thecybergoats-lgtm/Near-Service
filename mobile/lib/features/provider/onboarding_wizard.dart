@@ -94,7 +94,7 @@ class _ProviderOnboardingWizardState extends ConsumerState<ProviderOnboardingWiz
           'experience_years': int.tryParse(_experienceController.text) ?? 0,
           'categories': categoryIds,
         },
-        if (_step == 2) {'radius_km': _radiusKm},
+        if (_step == 2) ...{'radius_km': _radiusKm},
         if (_step == 3) ...{
           'payout_method': _payoutMethod,
           'payout_account': _payoutController.text.trim(),

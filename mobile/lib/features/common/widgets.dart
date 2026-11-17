@@ -133,7 +133,7 @@ class ProviderCard extends StatelessWidget {
     this.onRequestQuote,
   });
 
-  final Provider provider;
+  final ServiceProvider provider;
   final VoidCallback? onTap;
   final VoidCallback? onRequestQuote;
 

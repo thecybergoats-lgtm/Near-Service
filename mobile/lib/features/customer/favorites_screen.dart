@@ -43,7 +43,7 @@ class FavoritesScreen extends ConsumerWidget {
               itemCount: favs.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (_, i) {
-                final Provider p = favs[i];
+                final ServiceProvider p = favs[i];
                 return ProviderCard(
                   provider: p,
                   onTap: () => context.push('/customer/provider/${p.id}', extra: p),

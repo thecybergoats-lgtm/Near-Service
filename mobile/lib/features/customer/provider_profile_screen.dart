@@ -17,14 +17,14 @@ class ProviderProfileScreen extends ConsumerStatefulWidget {
   const ProviderProfileScreen({super.key, required this.providerId, this.initial});
 
   final String providerId;
-  final Provider? initial;
+  final ServiceProvider? initial;
 
   @override
   ConsumerState<ProviderProfileScreen> createState() => _ProviderProfileScreenState();
 }
 
 class _ProviderProfileScreenState extends ConsumerState<ProviderProfileScreen> {
-  Provider? _provider;
+  ServiceProvider? _provider;
   bool _loading = true;
   // Phase 4 (item 4): 7-day warranty badge — Tier 3 only, hidden otherwise.
   bool _warrantyEligible = false;

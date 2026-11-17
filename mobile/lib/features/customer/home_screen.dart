@@ -10,6 +10,7 @@ import '../../core/category_resolver.dart';
 import '../../core/constants.dart';
 import '../../core/demo_data.dart';
 import '../../core/models.dart';
+import '../../core/theme.dart';
 import '../../l10n/app_localizations.dart';
 import '../common/widgets.dart';
 
@@ -24,7 +25,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   LatLng _center = const LatLng(AppConstants.quettaLat, AppConstants.quettaLng);
-  List<Provider> _providers = [];
+  List<ServiceProvider> _providers = [];
   List<Category> _categories = DemoData.categories;
   bool _loading = true;
   bool _offline = false;
@@ -64,7 +65,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (mounted) setState(() => _loading = false);
   }
 
-  bool _matchesCategory(Provider p) => true; // demo list is unfiltered
+  bool _matchesCategory(ServiceProvider p) => true; // demo list is unfiltered
 
   /// Extra map for the request form: a UUID goes as `categoryId`, a slug
   /// goes as `categorySlug` — a slug is never passed as `categoryId`

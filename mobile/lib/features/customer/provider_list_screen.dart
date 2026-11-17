@@ -22,7 +22,7 @@ class ProviderListScreen extends ConsumerStatefulWidget {
 }
 
 class _ProviderListScreenState extends ConsumerState<ProviderListScreen> {
-  List<Provider> _providers = [];
+  List<ServiceProvider> _providers = [];
   bool _loading = true;
   bool _offline = false;
   double _radius = AppConstants.defaultRadiusKm;
@@ -58,7 +58,7 @@ class _ProviderListScreenState extends ConsumerState<ProviderListScreen> {
     if (mounted) setState(() => _loading = false);
   }
 
-  bool _demoFilter(Provider p) {
+  bool _demoFilter(ServiceProvider p) {
     if (_openNow && !p.isOpen) return false;
     if (_verifiedOnly && p.tier < 1) return false;
     if (_minRating > 0 && p.rating < _minRating) return false;

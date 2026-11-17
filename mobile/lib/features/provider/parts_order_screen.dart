@@ -186,7 +186,7 @@ class _PartsOrderScreenState extends ConsumerState<PartsOrderScreen> {
   Future<void> _transition(PartnerOrder order, String action) async {
     try {
       await widget.api.transitionPartnerOrder(order.id, action);
-      setState(() => _msg = 'Order $actioned.');
+      setState(() => _msg = 'Order $action.');
       await _load();
     } catch (e) {
       setState(() => _msg = e.toString());

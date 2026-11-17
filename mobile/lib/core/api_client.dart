@@ -322,7 +322,7 @@ class ApiClient implements PartnerApi {
   /// query carries the right key (see [_categoryQuery]).
   /// NOTE: `min_rating` and `type` are NOT query params in the OpenAPI
   /// contract, so they are applied client-side below instead of sent.
-  Future<List<Provider>> getNearbyProviders({
+  Future<List<ServiceProvider>> getNearbyProviders({
     required double lat,
     required double lng,
     String? categoryId,
@@ -351,7 +351,7 @@ class ApiClient implements PartnerApi {
     // Nearby is GET /providers/nearby?lat=&lng=&category_id=&radius_km=
     // &open_now=&verified_only= ; is_open_now is computed by the backend
     // in Asia/Karachi from the provider's availability rows (FIX 11).
-    var providers = parsePage(_decode(res), Provider.fromJson);
+    var providers = parsePage(_decode(res), ServiceProvider.fromJson);
     if (minRating != null && minRating > 0) {
       providers = providers.where((p) => p.rating >= minRating).toList();
     }
@@ -361,10 +361,10 @@ class ApiClient implements PartnerApi {
     return providers;
   }
 
-  Future<Provider> getProvider(String id) async {
+  Future<ServiceProvider> getProvider(String id) async {
     final res = await _send((h) => _http.get(_u('/providers/$id'), headers: h));
     if (res.statusCode != 200) _throwError(res);
-    return Provider.fromJson(_decode(res) as Map<String, dynamic>);
+    return ServiceProvider.fromJson(_decode(res) as Map<String, dynamic>);
   }
 
   Future<void> setOnline(bool online, double lat, double lng) async {
@@ -406,7 +406,7 @@ class ApiClient implements PartnerApi {
     // removed (Stage 3) — the backend is on the v1.2+ envelope.
     final provs = (provsRaw is Map ? provsRaw['items'] ?? [] : []) as List;
     for (final e in provs) {
-      final p = Provider.fromJson(e as Map<String, dynamic>);
+      final p = ServiceProvider.fromJson(e as Map<String, dynamic>);
       out.add({
         'type': 'provider',
         'id': p.id,

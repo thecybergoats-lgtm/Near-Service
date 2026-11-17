@@ -69,7 +69,7 @@ GoRouter buildRouter() {
         path: '/customer/provider/:id',
         builder: (_, state) => ProviderProfileScreen(
           providerId: state.pathParameters['id'] ?? '',
-          initial: state.extra is Provider ? state.extra as Provider : null,
+          initial: state.extra is ServiceProvider ? state.extra as ServiceProvider : null,
         ),
       ),
       GoRoute(

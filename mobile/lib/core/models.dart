@@ -43,7 +43,7 @@ class AppUser {
 /// are views over it, not separate wallets.
 class MyProfiles {
   final bool customer;
-  final Provider? provider;
+  final ServiceProvider? provider;
 
   const MyProfiles({required this.customer, this.provider});
 
@@ -51,7 +51,7 @@ class MyProfiles {
         customer: (j['customer'] as bool?) ?? false,
         provider: j['provider'] == null
             ? null
-            : Provider.fromJson(j['provider'] as Map<String, dynamic>),
+            : ServiceProvider.fromJson(j['provider'] as Map<String, dynamic>),
       );
 }
 
@@ -119,7 +119,7 @@ class Category {
   }
 }
 
-class Provider {
+class ServiceProvider {
   final String id;
   final String displayName;
   final String? shopName;
@@ -140,7 +140,7 @@ class Provider {
   final String? photoUrl;
   final String? bio;
 
-  const Provider({
+  const ServiceProvider({
     required this.id,
     required this.displayName,
     this.shopName,
@@ -162,9 +162,9 @@ class Provider {
     this.bio,
   });
 
-  factory Provider.fromJson(Map<String, dynamic> j) {
+  factory ServiceProvider.fromJson(Map<String, dynamic> j) {
     double numD(dynamic v) => (v as num?)?.toDouble() ?? 0;
-    return Provider(
+    return ServiceProvider(
       id: (j['id'] ?? '').toString(),
       displayName: (j['display_name'] ?? j['displayName'] ?? '').toString(),
       shopName: j['shop_name'] as String? ?? j['shopName'] as String?,
@@ -955,7 +955,10 @@ class JobAdjustment {
     // items may arrive as a JSON array, or as a JSON-encoded string
     // (raw job_price_adjustments row from the DB).
     final raw = j['items'];
-    final List decodedItems;
+    // NOTE: intentionally not `final` — a final assigned inside try{}
+    // cannot be assigned again in catch{} (analyzer: "might already be
+    // assigned"); every path below assigns exactly once.
+    List decodedItems;
     if (raw is String) {
       try {
         decodedItems = jsonDecode(raw) as List;
