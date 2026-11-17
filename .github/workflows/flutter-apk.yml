@@ -1,0 +1,74 @@
+# Near Service — Flutter APK build (free, GitHub Actions)
+#
+# Builds the Android APK on every push that touches mobile/ and on manual
+# runs. The APK is uploaded as a build artifact — download it from the
+# Actions tab, no Play Store account needed.
+#
+# API address: the app defaults to http://localhost:3000/api/v1 (see
+# mobile/lib/core/constants.dart). That does NOT work on a real phone.
+# When the backend is live, run this workflow manually (Actions >
+# Build Android APK > Run workflow) and set api_base_url to the live
+# server, e.g. https://api.nearservice.pk/api/v1
+#
+# Cost: free on a public repo (unlimited Actions minutes); on a private
+# repo the free tier is 2,000 minutes/month and one APK build takes
+# roughly 10-20 minutes.
+
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/flutter-apk.yml'
+  workflow_dispatch:
+    inputs:
+      api_base_url:
+        description: 'Live API base URL (e.g. https://api.example.com/api/v1). Leave empty to use the localhost default.'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17 (required by Android Gradle plugin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter 3.24.5
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: flutter pub get
+
+      # Analyzer warnings do not block the APK; the build itself is the gate.
+      - name: Analyze (non-blocking)
+        working-directory: mobile
+        run: flutter analyze --no-fatal-infos
+        continue-on-error: true
+
+      - name: Build release APK
+        working-directory: mobile
+        run: >
+          flutter build apk --release
+          --dart-define=API_BASE_URL=${{ inputs.api_base_url || 'http://localhost:3000/api/v1' }}
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: near-service-apk
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30

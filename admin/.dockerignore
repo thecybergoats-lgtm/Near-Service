@@ -1,0 +1,11 @@
+# .dockerignore for the ADMIN image (build context = admin/).
+# Anything matching here is never sent to the Docker daemon, so it can
+# never end up in the image — in particular no .env / secret file.
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.example
+*.pem
+*.key

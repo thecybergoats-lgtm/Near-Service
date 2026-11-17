@@ -1,0 +1,61 @@
+# Near Service — Ingress.
+#
+# Public entry point: api.<domain> -> backend:3000, admin.<domain> -> admin:3001.
+# Hosts default to nearservice.pk (the domain used in the repo's examples,
+# e.g. the CORS_ORIGINS comment in docker-compose.yml). Replace both hosts
+# with the real domain, matching Terraform var.domain.
+#
+# TLS: this manifest expects cert-manager (or the AWS Load Balancer
+# Controller with the ACM annotation) to provide the certificate.
+#   Option A (cert-manager, any cluster): keep the cert-manager annotation
+#     below and the tls.secretName; cert-manager issues via Let's Encrypt.
+#   Option B (AWS + Terraform ACM): install the AWS Load Balancer
+#     Controller, change ingressClassName to `alb`, replace the
+#     cert-manager annotation with
+#     `alb.ingress.kubernetes.io/certificate-arn: <terraform output
+#     acm_certificate_arn>`, and drop the tls block (ALB terminates TLS).
+# The nginx ingress class is the default here because it works on any
+# cluster; switch it only if Option B is chosen.
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: near-service
+  namespace: near-service
+  labels:
+    app.kubernetes.io/part-of: near-service
+  annotations:
+    # cert-manager: issues a Let's Encrypt certificate for both hosts and
+    # stores it in the Secret named below. Remove this annotation if using
+    # the AWS ALB + ACM option (see header comment).
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m" # provider-document uploads
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.nearservice.pk
+        - admin.nearservice.pk
+      secretName: near-service-tls
+  rules:
+    - host: api.nearservice.pk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 3000
+    - host: admin.nearservice.pk
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: admin
+                port:
+                  number: 3001

@@ -1,0 +1,6 @@
+# Terraform state / local secrets — never commit these.
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.tfplan

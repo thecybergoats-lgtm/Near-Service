@@ -1,0 +1,227 @@
+# Near Service — production compose file (STANDALONE)
+#
+# A complete production replacement for docker-compose.yml — NOT an overlay
+# merged on top of it. Run it on a host with Docker:
+#   cp ../infra/docker-compose.prod.env.example .env.prod
+#   # fill in every value, then:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#   docker compose -f docker-compose.prod.yml exec backend npm run migrate
+#   docker compose -f docker-compose.prod.yml exec backend npm run seed
+#
+# What changed vs the dev file (docker-compose.yml):
+#   - Images come from a registry (BACKEND_IMAGE / ADMIN_IMAGE), not from
+#     local `build:` contexts. They are built by CI from
+#     backend/Dockerfile and admin/Dockerfile (Fix C) and pushed to the
+#     ECR repos Terraform creates; see .github/workflows/ci.yml
+#     (docker-build job, build only — no push from CI yet; push is a
+#     separate step, see infra/k8s/README.md "Images").
+#     To build them locally instead, set BACKEND_IMAGE / ADMIN_IMAGE to a
+#     local tag and build with:
+#       docker build -f backend/Dockerfile -t <tag> .
+#       docker build -t <tag> ./admin
+#   - A `migrate` one-shot service runs `node dist/scripts/migrate.js`
+#     from the backend image before the API starts (same as dev).
+#   - restart: unless-stopped everywhere; CPU/memory limits on every
+#     service; JSON log rotation (10 MB x 3 files).
+#   - NO dev defaults: every secret is a required ${VAR:?} — compose fails
+#     fast with a clear error instead of booting on a placeholder.
+#   - NODE_ENV=production, OTP_DEV_MODE=false, PAYMENT_GATEWAY_MODE from
+#     env (default sandbox; live refuses to boot without live keys).
+#   - Postgres/Redis ports are NOT published to the host (dev published
+#     5432/6379). Backend/admin bind to localhost only (127.0.0.1) — put a
+#     reverse proxy (Caddy/nginx) in front for public traffic.
+#   - CORS_ORIGINS must be the admin origin (empty = no browser origin
+#     allowed, Stage 3 FIX 12).
+#   - Named volumes pgdata-prod / redisdata-prod (separate from dev's
+#     pgdata, so prod data is never mixed with dev data).
+#   - Backend healthcheck still uses /api/v1/ready (Postgres + Redis both
+#     up); admin healthcheck fetches / on container port 3001 (Fix C:
+#     the admin listens on 3001 everywhere now).
+#   - STORAGE_UPLOAD_BASE_URL: set to the S3 bucket URL from Terraform
+#     (output uploads_base_url). Empty keeps the local dev receiver
+#     behaviour — not suitable for production.
+services:
+  postgres:
+    image: postgis/postgis:15-3.4
+    container_name: near-service-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nearservice}
+      POSTGRES_USER: ${POSTGRES_USER:-nearservice}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (no default in production)}
+    volumes:
+      - pgdata-prod:/var/lib/postgresql/data
+    networks:
+      - near-service-prod
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nearservice} -d ${POSTGRES_DB:-nearservice}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: near-service-redis-prod
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata-prod:/data
+    networks:
+      - near-service-prod
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # One-shot migrations (Fix C) — same contract as the dev file: runs
+  # `node dist/scripts/migrate.js` from the backend image and must exit
+  # 0 before the API starts. Seed is still manual (see README.md).
+  migrate:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required, e.g. <account>.dkr.ecr.ap-south-1.amazonaws.com/near-service/backend:<tag>}
+    container_name: near-service-migrate-prod
+    restart: "no"
+    command: ["node", "backend/dist/scripts/migrate.js"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - near-service-prod
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backend:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required, e.g. <account>.dkr.ecr.ap-south-1.amazonaws.com/near-service/backend:<tag>}
+    container_name: near-service-backend-prod
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      JWT_ACCESS_TTL_SECONDS: "900"
+      JWT_REFRESH_TTL_SECONDS: "2592000"
+      CNIC_PEPPER: ${CNIC_PEPPER:?CNIC_PEPPER is required}
+      OTP_HASH_SECRET: ${OTP_HASH_SECRET:?OTP_HASH_SECRET is required}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?FIELD_ENCRYPTION_KEY is required}
+      OTP_DEV_MODE: "false"
+      OTP_TTL_SECONDS: "300"
+      OTP_MAX_ATTEMPTS_PER_PHONE_PER_HOUR: "5"
+      COMMISSION_RATE_DEFAULT: "0.10"
+      PAYMENT_GATEWAY_MODE: ${PAYMENT_GATEWAY_MODE:-sandbox}
+      STORAGE_UPLOAD_BASE_URL: ${STORAGE_UPLOAD_BASE_URL:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required, e.g. https://admin.nearservice.pk}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - near-service-prod
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/v1/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  admin:
+    image: ${ADMIN_IMAGE:?ADMIN_IMAGE is required, e.g. <account>.dkr.ecr.ap-south-1.amazonaws.com/near-service/admin:<tag>}
+    container_name: near-service-admin-prod
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required, e.g. https://api.nearservice.pk/api/v1}
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      - backend
+    networks:
+      - near-service-prod
+    # Next.js has no dedicated health endpoint; / returns 200 when up.
+    # The admin listens on container port 3001 (Fix C: one port
+    # everywhere — package.json, Dockerfile, compose, K8s, Ingress).
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3001/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  near-service-prod:
+    name: near-service-prod
+
+volumes:
+  pgdata-prod:
+    name: near-service-pgdata-prod
+  redisdata-prod:
+    name: near-service-redisdata-prod

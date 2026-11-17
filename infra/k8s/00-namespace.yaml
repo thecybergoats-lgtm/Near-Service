@@ -1,0 +1,8 @@
+# Near Service — Kubernetes namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: near-service
+  labels:
+    app.kubernetes.io/part-of: near-service
+    app.kubernetes.io/managed-by: kubectl

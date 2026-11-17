@@ -1,0 +1,118 @@
+# Near Service — PostgreSQL (self-hosted path).
+#
+# CHOOSE ONE data path — do not run both:
+#   (a) MANAGED (recommended): RDS from infra/terraform/. Then DO NOT apply
+#       this file, and point DATABASE_URL at RDS (Terraform writes it into
+#       Secrets Manager; see 02-secret.yaml).
+#   (b) SELF-HOSTED: apply this file. One replica only — Postgres is not
+#       run active-active here; HA is a Patroni/Stolon setup and is out of
+#       scope for this item.
+#
+# Maps to the `postgres` service in docker-compose.yml:
+#   image postgis/postgis:15-3.4 (Postgres 15 + PostGIS 3 — db/0001_init.sql
+#   runs CREATE EXTENSION postgis/pg_trgm/pgcrypto), database `nearservice`,
+#   user `nearservice`, data on a persistent volume, pg_isready healthcheck.
+# Differences from dev: no published host port, password from the Secret
+# (never the dev password), resource limits, and a 20 Gi persistent volume
+# instead of the anonymous `pgdata` Docker volume.
+#
+# First boot: run the migrations + seed from a backend pod, same commands
+# as the dev README (npm run migrate / npm run seed) — the backend does not
+# auto-migrate.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: near-service
+  labels:
+    app.kubernetes.io/part-of: near-service
+    app.kubernetes.io/component: postgres
+spec:
+  clusterIP: None # headless — stable DNS postgres.near-service.svc.cluster.local
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: near-service
+  labels:
+    app.kubernetes.io/part-of: near-service
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/part-of: near-service
+        app.kubernetes.io/component: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgis/postgis:15-3.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: near-service-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: near-service-config
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: near-service-secrets
+                  key: POSTGRES_PASSWORD
+          # Dev compose used pg_isready as the healthcheck; same probe here.
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "nearservice", "-d", "nearservice"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "nearservice", "-d", "nearservice"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        # Use the cluster's default StorageClass; set storageClassName
+        # explicitly (e.g. gp3 on EKS) when the default is not suitable.
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi

@@ -1,0 +1,126 @@
+# Near Service — Phase 1 local stack (development only)
+# Requires Docker on the host machine. This VM has no Docker, so this file
+# was written but NOT run here. On a machine with Docker:
+#   cp backend/.env.example backend/.env   # then set real secrets
+#   docker compose up -d --build
+#   docker compose exec backend npm run migrate
+#   docker compose exec backend npm run seed
+# Services: Postgres 15 + PostGIS (5432), Redis 7 (6379),
+# backend NestJS (3000), admin Next.js (3001).
+# Images are built from backend/Dockerfile and admin/Dockerfile (Fix C).
+# The backend Dockerfile's build context is the REPO ROOT (it needs db/
+# next to backend/dist — see backend/Dockerfile). `docker compose up`
+# runs the `migrate` one-shot service first; the backend only starts
+# after migrations have applied successfully.
+services:
+  postgres:
+    image: postgis/postgis:15-3.4
+    container_name: near-service-postgres
+    environment:
+      POSTGRES_DB: nearservice
+      POSTGRES_USER: nearservice
+      POSTGRES_PASSWORD: nearservice_dev_only
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nearservice -d nearservice"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: near-service-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot migrations (Fix C). Runs `node dist/scripts/migrate.js`
+  # inside the backend image (layout: /app/backend/dist + /app/db, so
+  # the script's ../../../db path resolves). Idempotent: already-applied
+  # files are skipped. The backend waits for this to exit 0.
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: near-service-backend:latest
+    container_name: near-service-migrate
+    command: ["node", "backend/dist/scripts/migrate.js"]
+    environment:
+      DATABASE_URL: postgres://nearservice:nearservice_dev_only@postgres:5432/nearservice
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: near-service-backend:latest
+    container_name: near-service-backend
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      DATABASE_URL: postgres://nearservice:nearservice_dev_only@postgres:5432/nearservice
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: dev_access_secret_change_me
+      JWT_REFRESH_SECRET: dev_refresh_secret_change_me
+      CNIC_PEPPER: dev_cnic_pepper_change_me
+      OTP_HASH_SECRET: dev_otp_hash_secret_change_me
+      FIELD_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      OTP_DEV_MODE: "true"
+      STORAGE_UPLOAD_BASE_URL: ""
+      # FIX 12 (Stage 3): browser origins allowed to call the API. Comma-
+      # separated; empty in production allows NO browser origin. Set to the
+      # admin origin(s) when deploying, e.g. "https://admin.nearservice.pk".
+      CORS_ORIGINS: "http://localhost:3001"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # FIX 13 (Stage 3): readiness probe — 200 only when Postgres + Redis
+    # are both up. Node is used (not curl) because the backend image has
+    # no guaranteed curl/wget.
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/v1/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3000/api/v1
+    image: near-service-admin:latest
+    container_name: near-service-admin
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3000/api/v1
+    ports:
+      # Admin listens on 3001 inside AND outside the container (Fix C:
+      # one port everywhere — package.json, Dockerfile, compose, K8s).
+      - "3001:3001"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3001/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  pgdata:

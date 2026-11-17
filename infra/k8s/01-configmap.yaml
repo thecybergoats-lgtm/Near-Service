@@ -1,0 +1,56 @@
+# Near Service — non-secret configuration.
+#
+# Maps to the `environment:` blocks of docker-compose.yml, minus every
+# secret (those live in 02-secret.yaml / Secrets Manager — see that file).
+# Values that differ between dev and prod are called out in the comments.
+#
+# STORAGE_UPLOAD_BASE_URL: set this to the Terraform output `uploads_base_url`
+# (https://<bucket>.s3.<region>.amazonaws.com) when the S3 bucket is used.
+# Leave "" only if uploads stay on the local dev receiver (not for prod).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: near-service-config
+  namespace: near-service
+  labels:
+    app.kubernetes.io/part-of: near-service
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+
+  # --- Database / cache hosts (MANAGED path: Terraform RDS + ElastiCache).
+  # When the managed path is used, DATABASE_URL / REDIS_URL come from the
+  # Secret instead and these two keys are ignored by the backend — they are
+  # kept here so the self-hosted path has a single place to change hosts.
+  # Self-hosted path: postgres / redis are the in-cluster Service names.
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "nearservice"
+  POSTGRES_USER: "nearservice"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+
+  # --- OTP / tokens (durations match backend/.env.example) ---
+  OTP_DEV_MODE: "false" # MUST be false in production: true prints OTP codes to logs and sends no SMS
+  OTP_TTL_SECONDS: "300"
+  OTP_MAX_ATTEMPTS_PER_PHONE_PER_HOUR: "5"
+  JWT_ACCESS_TTL_SECONDS: "900"
+  JWT_REFRESH_TTL_SECONDS: "2592000"
+
+  # --- Payments ---
+  # sandbox until live merchant onboarding is complete. Live mode refuses
+  # to boot unless live credentials are set — it never silently falls back.
+  PAYMENT_GATEWAY_MODE: "sandbox"
+  COMMISSION_RATE_DEFAULT: "0.10"
+
+  # --- Uploads / CORS ---
+  STORAGE_UPLOAD_BASE_URL: "" # <-- set to the Terraform uploads_base_url output for prod
+  # Empty in production = NO browser origin allowed (Stage 3, FIX 12).
+  # Set to the admin origin so the admin panel can call the API.
+  CORS_ORIGINS: "https://admin.nearservice.pk"
+
+  # --- Admin (Next.js) ---
+  # Public API base the admin panel calls in the browser. Must match the
+  # Ingress host + the backend global prefix /api/v1.
+  NEXT_PUBLIC_API_URL: "https://api.nearservice.pk/api/v1"

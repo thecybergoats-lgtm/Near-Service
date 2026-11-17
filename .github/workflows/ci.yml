@@ -1,0 +1,139 @@
+# Near Service CI — runs on every push / PR.
+# 1) migrate: fresh Postgres 16 + PostGIS 3, apply ALL migrations on an empty
+#    database, then assert the seed counts (15 providers — 12 Quetta +
+#    3 Karachi from 0018_multi_city.sql — and 33 categories).
+#    Catches the 0004_seed.sql malformed-UUID bug class before it ships.
+# 2) security-grep: fail if dev secrets or Math.random OTP generation appear
+#    anywhere in backend/src.
+# 3) backend tests: unit + integration (real Postgres + real Redis).
+name: CI
+on: [push, pull_request]
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: nearservice_test
+          POSTGRES_USER: nearservice
+          POSTGRES_PASSWORD: test-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U nearservice -d nearservice_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+        working-directory: backend
+      - run: node ../db/check-uuids.js
+      - run: npm run build
+        working-directory: backend
+      - name: migrate empty database
+        working-directory: backend
+        env:
+          DATABASE_URL: postgres://nearservice:test-password@localhost:5432/nearservice_test
+        run: npm run migrate
+      - name: assert seed counts
+        env:
+          PGPASSWORD: test-password
+        run: |
+          test "$(psql -h localhost -U nearservice -d nearservice_test -tA -c 'SELECT count(*) FROM provider_profiles')" = "15"
+          test "$(psql -h localhost -U nearservice -d nearservice_test -tA -c 'SELECT count(*) FROM categories')" = "33"
+          psql -h localhost -U nearservice -d nearservice_test -tA -c 'SELECT count(*) FROM schema_migrations'
+
+  security-grep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: no dev secrets in backend/src
+        run: |
+          ! grep -rn "dev-secret-change-me\|dev-refresh-change-me" backend/src/ || (echo "dev secret fallback found in src/" && exit 1)
+      - name: no Math.random in OTP generation
+        # Match an actual CALL (Math.random followed by "("); the file's header
+        # comment mentions the name without calling it, which is fine.
+        run: |
+          ! grep -nE "Math\.random\s*\(" backend/src/common/utils/otp.ts || (echo "Math.random used in otp.ts" && exit 1)
+
+  backend-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: nearservice_test
+          POSTGRES_USER: nearservice
+          POSTGRES_PASSWORD: test-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U nearservice -d nearservice_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+        working-directory: backend
+      - run: npm run build
+        working-directory: backend
+      - name: migrate test database
+        working-directory: backend
+        env:
+          DATABASE_URL: postgres://nearservice:test-password@localhost:5432/nearservice_test
+        run: npm run migrate
+      - name: run tests (unit + integration, real DB + Redis)
+        working-directory: backend
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://nearservice:test-password@localhost:5432/nearservice_test
+          REDIS_URL: redis://localhost:6379
+          JWT_ACCESS_SECRET: test-access-secret-min-32-chars-long
+          JWT_REFRESH_SECRET: test-refresh-secret-min-32-chars-long
+          CNIC_PEPPER: test-cnic-pepper-min-32-chars-long
+          OTP_HASH_SECRET: test-otp-hash-secret-min-32-chars
+          FIELD_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          OTP_DEV_MODE: "false"
+        run: npm test
+
+  # Fix C: build both container images on every push/PR (build only —
+  # push: false, nothing is pushed to any registry). A broken Dockerfile
+  # fails CI here instead of failing at deploy time. The backend build
+  # context is the repo root (the Dockerfile needs db/ next to
+  # backend/dist — see backend/Dockerfile); the admin context is admin/.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: lint Dockerfiles
+        uses: hadolint/hadolint-action@v3.1
+        with:
+          dockerfile: backend/Dockerfile
+      - name: lint admin Dockerfile
+        uses: hadolint/hadolint-action@v3.1
+        with:
+          dockerfile: admin/Dockerfile
+      - uses: docker/setup-buildx-action@v3
+      - name: build backend image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: false
+          tags: near-service-backend:ci
+      - name: build admin image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./admin
+          file: admin/Dockerfile
+          push: false
+          tags: near-service-admin:ci
+          build-args: |
+            NEXT_PUBLIC_API_URL=http://localhost:3000/api/v1

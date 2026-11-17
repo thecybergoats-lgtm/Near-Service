@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Near Service</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Near Service</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(FLUTTER_BUILD_NAME)</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<!-- Permissions (Phase 3 integrator addition): the app uses location
+	     for nearby providers + live tracking (geolocator), the camera for
+	     provider document / selfie capture (face-match), the microphone
+	     for on-device voice search, and the photo library for picking a
+	     photo of the problem (AI photo search). Each string is shown by
+	     iOS in the permission prompt — keep them user-facing. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Near Service uses your location to show nearby providers and to track your job live.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Near Service uses your location to show nearby providers and to track your job live.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Near Service uses the camera for provider verification (selfie + CNIC photo) and for photos of the problem.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Near Service uses the microphone for voice search on your phone.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Near Service uses your photo library so you can attach a photo of the problem to a request.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Near Service saves photos you take for a request to your photo library.</string>
+</dict>
+</plist>

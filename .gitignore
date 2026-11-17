@@ -1,0 +1,35 @@
+# Dependencies / build outputs
+node_modules/
+dist/
+build/
+.next/
+out/
+
+# Flutter / Dart
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+
+# Environment / secrets — NEVER commit real secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Uploads / local data
+backend/uploads/
+*.db
+*.sqlite
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.backup
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

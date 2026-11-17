@@ -1,0 +1,10 @@
+# Flutter / Dart
+.dart_tool/
+build/
+.pub-cache/
+.pub/
+*.lock
+# Android local config (contains the Flutter SDK path — machine-specific)
+android/local.properties
+# Misc
+.DS_Store

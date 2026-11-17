@@ -1,0 +1,48 @@
+# Near Service — example variables file.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#   # fill in every REQUIRED value below, then:
+#   terraform init && terraform plan && terraform apply
+#
+# NEVER commit terraform.tfvars — it holds real secrets. It is covered by
+# the .gitignore in infra/ (and would be even without it: do not commit it).
+#
+# Values marked "generate" can be produced locally with:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+#     (base64 form is for field_encryption_key only — exactly 32 bytes)
+
+# --- Domain / DNS (REQUIRED for a public deployment) ----------------------
+# Root domain; the API is served at api.<domain>, admin at admin.<domain>.
+domain = "nearservice.pk"
+
+# Route53 hosted-zone ID for the domain above. Find it in the AWS console:
+# Route 53 > Hosted zones > (your zone) > Hosted zone ID.
+route53_zone_id = "REPLACE_ME_WITH_HOSTED_ZONE_ID"
+
+# --- Region / environment (defaults are fine for a first deployment) ------
+# aws_region          = "ap-south-1"
+# environment         = "production"
+# single_nat_gateway  = true   # set false for production HA (one NAT per AZ)
+# db_multi_az         = false  # set true for production HA
+
+# --- App secrets (REQUIRED — generate, do not reuse the dev values) -------
+# Dev values from docker-compose.yml / backend/.env.example
+# (dev_access_secret_change_me etc.) MUST NOT be used here.
+jwt_access_secret  = "REPLACE_ME_GENERATE_32_PLUS_CHARS"
+jwt_refresh_secret = "REPLACE_ME_GENERATE_32_PLUS_CHARS_DIFFERENT_FROM_ACCESS"
+cnic_pepper        = "REPLACE_ME_GENERATE_32_PLUS_CHARS"
+otp_hash_secret    = "REPLACE_ME_GENERATE_32_PLUS_CHARS"
+
+# Base64 of exactly 32 bytes (44 chars ending in "=").
+field_encryption_key = "REPLACE_ME_BASE64_OF_32_BYTES"
+
+# --- Optional -------------------------------------------------------------
+# payment_gateway_mode = "sandbox"   # keep sandbox until live merchant
+#                                      # onboarding is complete; live mode
+#                                      # refuses to boot without live keys.
+# cors_origins         = "https://admin.nearservice.pk"
+#                                      # defaults to "" (no browser origin
+#                                      # allowed) if left unset — set it to
+#                                      # the admin origin so the panel works.
+# enable_uploads_bucket = true
