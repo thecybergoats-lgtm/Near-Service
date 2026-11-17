@@ -367,6 +367,32 @@ class ApiClient implements PartnerApi {
     return ServiceProvider.fromJson(_decode(res) as Map<String, dynamic>);
   }
 
+  /// GET /places/nearby — real-world shops from OpenStreetMap (free, no
+  /// key). Returns the shops plus `degraded` (true when Overpass errored,
+  /// timed out or found nothing — the list is then empty and the caller
+  /// keeps showing registered providers). A non-200 here is a real client
+  /// error (e.g. unknown category slug -> 422) and still throws.
+  Future<({List<PlaceShop> shops, bool degraded})> getNearbyPlaces({
+    required double lat,
+    required double lng,
+    required String categorySlug,
+    double radiusKm = AppConstants.placesRadiusKm,
+  }) async {
+    final query = <String, String>{
+      'lat': lat.toString(),
+      'lng': lng.toString(),
+      'category_slug': categorySlug,
+      'radius_km': radiusKm.toString(),
+    };
+    final res = await _send((h) => _http.get(_u('/places/nearby', query), headers: h));
+    if (res.statusCode != 200) _throwError(res);
+    final body = _decode(res) as Map<String, dynamic>;
+    final items = (body['items'] as List? ?? [])
+        .map((e) => PlaceShop.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return (shops: items, degraded: body['degraded'] == true);
+  }
+
   Future<void> setOnline(bool online, double lat, double lng) async {
     final res = await _send(
       (h) => _http.patch(_u('/providers/me/online'),

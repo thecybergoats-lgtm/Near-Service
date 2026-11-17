@@ -1,10 +1,10 @@
-# Near Service API — OpenAPI 3.1, version 1.6.0 (v1.5.0 + Phase 4 additions).
+# Near Service API — OpenAPI 3.1, version 1.7.0 (v1.6.0 + Places discovery via OpenStreetMap).
 # Source of truth for the contract test (test/contract/api.contract.spec.ts):
 # the set of (method, path) here must equal the routes registered by the Nest app.
 openapi: 3.1.0
 info:
   title: Near Service API
-  version: 1.6.0
+  version: 1.7.0
   description: 'OpenAPI 3.1 skeleton for the Near Service Phase 1 (MVP) endpoints. Companion to the Phase 0 PRD v1.1. Phase 2 endpoints (wallet, payment intents, payouts, escrow) are intentionally excluded
     and will extend this file. Identifier rule (v1.1): category_id is always a UUID (format: uuid). A client may instead send category_slug; the API resolves the slug to its UUID and echoes the canonical
     UUID in every response.
@@ -277,6 +277,16 @@ components:
           - active
           - suspended
           - banned
+          readOnly: true
+        roles:
+          type: array
+          items:
+            type: string
+          description: Role names from user_roles (e.g. customer, provider).
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
           readOnly: true
     Address:
       type: object
@@ -1485,6 +1495,55 @@ components:
             type: array
             items:
               $ref: '#/components/schemas/ProviderCard'
+    PlaceShop:
+      type: object
+      description: One real-world shop from OpenStreetMap (not a registered provider).
+      required:
+      - name
+      - lat
+      - lng
+      - distance_km
+      - source
+      properties:
+        name:
+          type: string
+          description: OSM name tag, or 'Unnamed shop' when the node has none.
+        lat:
+          type: number
+        lng:
+          type: number
+        distance_km:
+          type: number
+          description: Haversine distance from the query centre, rounded to 2 decimals.
+        tags:
+          type: object
+          properties:
+            shop:
+              type: string
+            craft:
+              type: string
+        source:
+          type: string
+          enum:
+          - openstreetmap
+    PlacesNearbyResponse:
+      type: object
+      required:
+      - items
+      - source
+      - degraded
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlaceShop'
+        source:
+          type: string
+          enum:
+          - openstreetmap
+        degraded:
+          type: boolean
+          description: True when Overpass errored, timed out or returned nothing — items is then [].
     ReviewPage:
       allOf:
       - $ref: '#/components/schemas/Page'
@@ -4934,6 +4993,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProviderPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /places/nearby:
+    get:
+      tags:
+      - Discovery
+      operationId: nearbyPlaces
+      summary: Real-world shops near the user, from OpenStreetMap (free, no key)
+      description: 'Proxies the Overpass API for the 5 launch categories. These are public map shops, NOT registered Near Service providers — the app shows them as a separate pin colour with a Directions button. The endpoint never returns 500 for an upstream problem: an Overpass error, timeout or empty result answers 200 with items [] and degraded true.'
+      parameters:
+      - name: lat
+        in: query
+        required: true
+        schema:
+          type: number
+          minimum: -90
+          maximum: 90
+      - name: lng
+        in: query
+        required: true
+        schema:
+          type: number
+          minimum: -180
+          maximum: 180
+      - name: category_slug
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - book-binding
+          - ac-repair
+          - electrician
+          - plumber
+          - mobile-repair
+        description: Only the 5 launch categories are mapped to OpenStreetMap tags.
+      - name: radius_km
+        in: query
+        required: false
+        schema:
+          type: number
+          default: 20
+          minimum: 0.5
+          maximum: 50
+      responses:
+        '200':
+          description: Real shops sorted by distance (or an empty degraded answer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlacesNearbyResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '422':

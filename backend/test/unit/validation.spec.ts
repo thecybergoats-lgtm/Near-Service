@@ -89,6 +89,10 @@ const CASES: Case[] = [
   // ---- waitlist ----
   { name: 'waitlist: lat 999', method: 'post', url: '/api/v1/waitlist', token: CUSTOMER, body: { category_slug: 'ac-repair', lat: 999, lng: 66.99 }, field: 'lat' },
   { name: 'waitlist: neither category', method: 'post', url: '/api/v1/waitlist', token: CUSTOMER, body: { lat: 30.18, lng: 66.99 }, field: 'category_id' },
+  // ---- places (OpenStreetMap discovery) ----
+  { name: 'places: unknown slug', method: 'get', url: '/api/v1/places/nearby?lat=30.18&lng=66.975&category_slug=plumbing-x', field: 'category_slug' },
+  { name: 'places: radius 60', method: 'get', url: '/api/v1/places/nearby?lat=30.18&lng=66.975&category_slug=book-binding&radius_km=60', field: 'radius_km' },
+  { name: 'places: lat 999', method: 'get', url: '/api/v1/places/nearby?lat=999&lng=66.975&category_slug=book-binding', field: 'lat' },
   // ---- jobs ----
   { name: 'transition: bad state', method: 'post', url: `/api/v1/jobs/${JOB_ID}/transition`, token: CUSTOMER, body: { to_state: 'WRONG' }, field: 'to_state' },
   { name: 'transition: lat 999', method: 'post', url: `/api/v1/jobs/${JOB_ID}/transition`, token: CUSTOMER, body: { to_state: 'ACCEPTED', lat: 999 }, field: 'lat' },

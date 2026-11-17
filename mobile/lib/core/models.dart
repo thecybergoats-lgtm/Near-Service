@@ -10,6 +10,7 @@ class AppUser {
   final String? fullName;
   final String language;
   final List<String> roles;
+  final DateTime? createdAt;
 
   const AppUser({
     required this.id,
@@ -17,6 +18,7 @@ class AppUser {
     this.fullName,
     this.language = 'ur',
     this.roles = const ['customer'],
+    this.createdAt,
   });
 
   factory AppUser.fromJson(Map<String, dynamic> j) => AppUser(
@@ -26,6 +28,9 @@ class AppUser {
         language: (j['language'] as String?) ?? 'ur',
         roles: (j['roles'] as List?)?.map((e) => e.toString()).toList() ??
             const ['customer'],
+        createdAt: j['created_at'] == null
+            ? null
+            : DateTime.tryParse(j['created_at'].toString()),
       );
 
   Map<String, dynamic> toJson() => {
@@ -34,7 +39,48 @@ class AppUser {
         'full_name': fullName,
         'language': language,
         'roles': roles,
+        if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
       };
+}
+
+/// One real-world shop from OpenStreetMap (GET /places/nearby). NOT a
+/// registered Near Service provider — shown on the map as an amber pin
+/// with a Directions button instead of a quote flow.
+class PlaceShop {
+  final String name;
+  final double lat;
+  final double lng;
+  final double distanceKm;
+  final String? shop;
+  final String? craft;
+
+  const PlaceShop({
+    required this.name,
+    required this.lat,
+    required this.lng,
+    required this.distanceKm,
+    this.shop,
+    this.craft,
+  });
+
+  factory PlaceShop.fromJson(Map<String, dynamic> j) => PlaceShop(
+        name: (j['name'] as String?)?.trim().isNotEmpty == true
+            ? (j['name'] as String)
+            : 'Unnamed shop',
+        lat: (j['lat'] as num?)?.toDouble() ?? 0,
+        lng: (j['lng'] as num?)?.toDouble() ?? 0,
+        distanceKm: (j['distance_km'] as num?)?.toDouble() ?? 0,
+        shop: (j['tags'] as Map?)?['shop'] as String?,
+        craft: (j['tags'] as Map?)?['craft'] as String?,
+      );
+
+  /// Short human label for the shop kind, e.g. "Stationery" / "Books".
+  String get kindLabel {
+    final raw = shop ?? craft ?? '';
+    if (raw.isEmpty) return 'Shop';
+    return raw.replaceAll('_', ' ').split(' ').map((w) =>
+        w.isEmpty ? w : w[0].toUpperCase() + w.substring(1)).join(' ');
+  }
 }
 
 /// GET /me/profiles response (OpenAPI): {customer: bool, provider:

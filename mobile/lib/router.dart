@@ -22,6 +22,7 @@ import 'features/customer/offers_screen.dart';
 import 'features/customer/payment_screen.dart';
 import 'features/customer/provider_list_screen.dart';
 import 'features/customer/provider_profile_screen.dart';
+import 'features/customer/profile_screen.dart';
 import 'features/customer/rating_screen.dart';
 import 'features/customer/request_form_screen.dart';
 import 'features/customer/search_screen.dart';
@@ -120,6 +121,7 @@ GoRouter buildRouter() {
         ),
       ),
       GoRoute(path: '/customer/history', builder: (_, __) => const HistoryScreen()),
+      GoRoute(path: '/customer/profile', builder: (_, __) => const ProfileScreen()),
       GoRoute(path: '/customer/favorites', builder: (_, __) => const FavoritesScreen()),
       GoRoute(
         path: '/customer/wallet',

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/api_client.dart';
+import '../../core/constants.dart';
 import '../../core/models.dart';
 import '../../l10n/app_localizations.dart';
 import 'wallet_screen.dart';
@@ -21,11 +23,31 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   ReferralInfo? _referral;
   bool _referralFailed = false;
+  // Local-only notification preference (no backend call — the server has
+  // no notification-preference store in Phase 1).
+  bool _notificationsEnabled = true;
 
   @override
   void initState() {
     super.initState();
     _loadReferral();
+    _loadNotifications();
+  }
+
+  Future<void> _loadNotifications() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _notificationsEnabled =
+            prefs.getBool(StorageKeys.notificationsEnabled) ?? true;
+      });
+    }
+  }
+
+  Future<void> _setNotifications(bool value) async {
+    setState(() => _notificationsEnabled = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(StorageKeys.notificationsEnabled, value);
   }
 
   Future<void> _loadReferral() async {
@@ -94,11 +116,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             subtitle: const Text('SOS alerts go to these people — add at least one'),
             onTap: () => context.push('/customer/trusted-contacts'),
           ),
-          ListTile(
-            leading: const Icon(Icons.notifications_outlined),
+          SwitchListTile(
+            secondary: const Icon(Icons.notifications_outlined),
             title: const Text('Notifications'),
             subtitle: const Text('Offers, job updates, critical SMS'),
-            onTap: () {},
+            value: _notificationsEnabled,
+            onChanged: _setNotifications,
           ),
           ListTile(
             leading: const Icon(Icons.help_outline),
@@ -114,6 +137,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const SnackBar(content: Text('Data export / deletion is handled by support in Phase 1.')),
               );
             },
+          ),
+          const Divider(),
+          const Text('About', style: TextStyle(fontWeight: FontWeight.w700)),
+          const ListTile(
+            leading: Icon(Icons.info_outline),
+            title: Text('Near Service'),
+            subtitle: Text(
+                'Version ${AppConstants.appVersion} — local services marketplace, Quetta launch.\n${AppConstants.osmAttribution}.'),
           ),
           const Divider(),
           ListTile(

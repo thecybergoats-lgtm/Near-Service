@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
 import '../../core/category_resolver.dart';
@@ -30,6 +31,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _loading = true;
   bool _offline = false;
   String? _selectedCategory;
+  /// Real-world shops from OpenStreetMap (GET /places/nearby). Shown only
+  /// when a category is selected, as amber pins — separate from the teal
+  /// registered-provider pins. Empty when nothing was found or the lookup
+  /// failed (providers still show).
+  List<PlaceShop> _places = [];
+  bool _placesDegraded = false;
 
   @override
   void initState() {
@@ -62,7 +69,96 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           .toList();
       _offline = true;
     }
+    await _loadPlaces();
     if (mounted) setState(() => _loading = false);
+  }
+
+  /// Real-shop discovery for the selected category (OpenStreetMap, free).
+  /// Runs only with a category selected; resolves the category slug from
+  /// the loaded list (the id is a UUID from the API, a slug in demo data).
+  /// Any failure leaves [_places] empty and marks the lookup degraded —
+  /// the provider list is unaffected.
+  Future<void> _loadPlaces() async {
+    _places = [];
+    _placesDegraded = false;
+    final slug = _selectedCategorySlug();
+    if (slug == null) return;
+    try {
+      final api = ref.read(apiClientProvider);
+      final res = await api.getNearbyPlaces(
+        lat: _center.latitude,
+        lng: _center.longitude,
+        categorySlug: slug,
+        radiusKm: AppConstants.placesRadiusKm,
+      );
+      _places = res.shops;
+      _placesDegraded = res.degraded;
+    } catch (_) {
+      _places = [];
+      _placesDegraded = true;
+    }
+  }
+
+  String? _selectedCategorySlug() {
+    final sel = _selectedCategory;
+    if (sel == null) return null;
+    for (final c in _categories) {
+      if (c.id == sel) return c.slug.isNotEmpty ? c.slug : null;
+    }
+    // Demo data / deep links may carry the slug itself as the id.
+    if (AppConstants.launchCategorySlugs.contains(sel)) return sel;
+    return null;
+  }
+
+  /// Shop pin bottom sheet: name, kind + distance, a note that this is a
+  /// real map shop (not a registered provider), and a Directions button
+  /// that opens Google Maps (free intent URL, no API key).
+  Future<void> _showShopSheet(PlaceShop s) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(s.name,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text('${s.kindLabel} · ${s.distanceKm.toStringAsFixed(1)} km away'),
+              const SizedBox(height: 4),
+              const Text(
+                'Real shop from OpenStreetMap — not a registered Near Service provider. Call or visit directly.',
+                style: TextStyle(color: Colors.grey),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => _openDirections(s),
+                  icon: const Icon(Icons.directions),
+                  label: const Text('Directions'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openDirections(PlaceShop s) async {
+    final uri = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}');
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Could not open Maps — is Google Maps installed?')),
+        );
+      }
+    }
   }
 
   bool _matchesCategory(ServiceProvider p) => true; // demo list is unfiltered
@@ -129,6 +225,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           child: const Icon(Icons.location_pin, color: Color(0xFF0F766E), size: 40),
                         ),
                       )),
+                  // Real OpenStreetMap shops: amber store pins, distinct
+                  // from the teal registered-provider pins.
+                  ..._places.map((s) => Marker(
+                        point: LatLng(s.lat, s.lng),
+                        width: 44,
+                        height: 44,
+                        child: GestureDetector(
+                          onTap: () => _showShopSheet(s),
+                          child: const Icon(Icons.store, color: Color(0xFFD97706), size: 36),
+                        ),
+                      )),
                 ],
               ),
             ],
@@ -191,6 +298,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                 ),
                 const Spacer(),
+                // Real-shop status line, shown only with a category
+                // selected: OSM attribution when pins are visible, else a
+                // plain "none found" note. Providers still show either way.
+                if (_selectedCategory != null && !_loading)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      _places.isNotEmpty
+                          ? AppConstants.osmAttribution
+                          : _placesDegraded
+                              ? 'Real-shop lookup is unavailable right now — showing app providers.'
+                              : 'No real shops found nearby for this service — showing app providers.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                  ),
                 if (_loading)
                   const Padding(
                     padding: EdgeInsets.all(16),
@@ -249,16 +372,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             case 1:
               context.push('/customer/providers');
             case 2:
-              context.push('/customer/history');
+              context.push('/customer/profile');
             case 3:
-              context.push('/customer/wallet');
+              context.push('/customer/settings');
           }
         },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Providers'),
-          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
-          BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet), label: 'Wallet'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     );

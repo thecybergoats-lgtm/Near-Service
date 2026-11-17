@@ -229,7 +229,7 @@ class _ProviderProfileScreenState extends ConsumerState<ProviderProfileScreen> {
             child: ListTile(
               leading: Icon(Icons.star, color: Color(0xFFD97706)),
               title: Text('Reviews appear here after completed, paid jobs.'),
-              subtitle: Text('Only customers with a settled job can review — PRD p.9.'),
+              subtitle: Text('Only customers with a settled job can review.'),
             ),
           ),
           const SizedBox(height: 24),

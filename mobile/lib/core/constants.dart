@@ -26,6 +26,15 @@ class AppConstants {
   static const int maxCounterRounds = 3;
   static const double defaultRadiusKm = 5.0;
 
+  /// Default radius for real-shop discovery (GET /places/nearby).
+  static const double placesRadiusKm = 20.0;
+
+  /// App version (keep in sync with pubspec.yaml `version:`).
+  static const String appVersion = '1.0.0+1';
+
+  /// Shown under the map whenever real OpenStreetMap shop pins are visible.
+  static const String osmAttribution = 'Map data © OpenStreetMap contributors';
+
   static const List<double> radiusOptions = [1, 3, 5, 10, 25];
 
   /// 5 launch categories (PRD p.2). Slugs match the backend seed.
@@ -48,4 +57,5 @@ class StorageKeys {
   static const String deviceFingerprint = 'ns_device_fingerprint';
   static const String deviceId = 'ns_device_id'; // id returned by POST /me/devices
   static const String onboardingDone = 'ns_onboarding_done';
+  static const String notificationsEnabled = 'ns_notifications_enabled'; // local only
 }

@@ -29,9 +29,10 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { CitiesModule } from './modules/cities/cities.module';
 import { WarrantyModule } from './modules/warranty/warranty.module';
 import { PartnersModule } from './modules/partners/partners.module';
+import { PlacesModule } from './modules/places/places.module';
 
 @Module({
-  imports: [DatabaseModule, RealtimeModule, AuthModule, UsersModule, ProvidersModule, CatalogModule, SearchModule, RequestsModule, OffersModule, JobsModule, MessagingModule, AdminModule, TrustModule, PaymentsModule, HealthModule, AiGatewayModule, RiskModule, SubscriptionsModule, TeamsModule, TendersModule, VerificationModule, EscrowModule, AnalyticsModule, CitiesModule, WarrantyModule, PartnersModule],
+  imports: [DatabaseModule, RealtimeModule, AuthModule, UsersModule, ProvidersModule, CatalogModule, SearchModule, RequestsModule, OffersModule, JobsModule, MessagingModule, AdminModule, TrustModule, PaymentsModule, HealthModule, AiGatewayModule, RiskModule, SubscriptionsModule, TeamsModule, TendersModule, VerificationModule, EscrowModule, AnalyticsModule, CitiesModule, WarrantyModule, PartnersModule, PlacesModule],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

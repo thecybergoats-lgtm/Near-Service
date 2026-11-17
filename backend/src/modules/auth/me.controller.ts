@@ -15,7 +15,12 @@ export class PatchMeDto {
 export class MeController {
   constructor(private db: DatabaseService) {}
   @Get() async me(@CurrentUser() u: AuthUser) {
-    const rows = (await this.db.query(`SELECT id, phone, full_name, language, status FROM users WHERE id=$1`, [u.id])).rows;
+    const rows = (await this.db.query(
+      `SELECT u.id, u.phone, u.full_name, u.language, u.status, u.created_at,
+              COALESCE((SELECT json_agg(r.name) FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id), '[]'::json) AS roles
+       FROM users u WHERE u.id = $1`,
+      [u.id],
+    )).rows;
     if (!rows[0]) throw Errors.notFound('User');
     return rows[0];
   }
