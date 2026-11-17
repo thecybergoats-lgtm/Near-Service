@@ -1,3 +1,22 @@
+// Fix (verified, Gradle 8.7 par local test ke saath): plugin projects
+// (jaise geolocator_android) mein `flutter.compileSdkVersion` resolve
+// nahi hota — `flutter` extension sirf :app par banti hai, plugin ko
+// parent chain se root par kuch nahi milta, is liye compileSdk ghalat
+// (ya bilkul set nahi) hota aur API 31/33 ke symbols (VERSION_CODES.S,
+// TIRAMISU) nahi milte. Root par ext.flutter map de kar plugin ki apni
+// line `compileSdk flutter.compileSdkVersion` seedha 34 parhti hai.
+// Local Gradle 8.7 test: map ke baghair plugin "Could not get unknown
+// property 'flutter'" (build 2 jaisi ghalti); map ke saath plugin
+// compileSdk=34, minSdk=21, targetSdk=34 — aur :app bhi 34 par hi rehta
+// hai. Is liye withId/afterEvaluate wale zabardasti wale tareeqe hata
+// diye — wo "too late" keh kar khud fail hote the (52a0ee3).
+ext.flutter = [
+    compileSdkVersion: 34,
+    minSdkVersion: 21,
+    targetSdkVersion: 34,
+    ndkVersion: "26.3.11579264"
+]
+
 allprojects {
     repositories {
         google()
@@ -10,31 +29,6 @@ rootProject.buildDir = "../build"
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
     project.evaluationDependsOn(":app")
-}
-
-subprojects {
-    // Fix: geolocator_android (aur baqi plugins) ka compileSdk kabhi kabhi
-    // ghalat resolve hota hai — plugin project mein `flutter.compileSdkVersion`
-    // purana SDK de deta hai, jis se API 31/33 ke symbols (VERSION_CODES.S,
-    // TIRAMISU) nahi milte aur build fail hota hai. Is liye har Android
-    // subproject ka compileSdk zabardasti 34 par set karte hain, jo
-    // flutter.compileSdkVersion (34) ke barabar hai.
-    // NOTE: afterEvaluate yahan NAHI chalta — :app pehle evaluate ho chuka
-    // hota hai aur Gradle "Cannot run Project.afterEvaluate when the project
-    // is already evaluated" kehta hai (fb40c2b isi liye fail hui). Is liye
-    // plugins.withId use karte hain: ye usi waqt chalta hai jab Android
-    // plugin apply hota hai, compileSdk padhne se pehle.
-    def subproject = project
-    subproject.plugins.withId("com.android.library") {
-        subproject.android {
-            compileSdk 34
-        }
-    }
-    subproject.plugins.withId("com.android.application") {
-        subproject.android {
-            compileSdk 34
-        }
-    }
 }
 
 tasks.register("clean", Delete) {
