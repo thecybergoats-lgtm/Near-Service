@@ -465,6 +465,21 @@ class L {
       'ur': 'آفرز',
       'ur-roman': 'Deals',
     },
+    'deals_of_the_day': {
+      'en': 'Deals of the day',
+      'ur': 'آج کی آفرز',
+      'ur-roman': 'Aaj ki deals',
+    },
+    'ends_today': {
+      'en': 'Ends today',
+      'ur': 'آج ختم ہو رہی ہے',
+      'ur-roman': 'Aaj khatam ho rahi hai',
+    },
+    'scan_qr_code': {
+      'en': 'Scan a provider QR code',
+      'ur': 'کاریگر کا کیو آر کوڈ اسکین کریں',
+      'ur-roman': 'Provider ka QR code scan karein',
+    },
   };
 
   String t(String key) =>

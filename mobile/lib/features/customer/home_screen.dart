@@ -42,6 +42,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// banner shows ONLY these — never hardcoded promo text. Empty or
   /// failed load hides the banner entirely.
   List<PromoItem> _promos = [];
+  /// Deals of the day from GET /promotions/today (Batch 3) — same
+  /// active promos, with validity info. Hidden when there are none.
+  List<TodayDeal> _deals = [];
 
   @override
   void initState() {
@@ -77,6 +80,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
     await _loadPlaces();
     await _loadPromos();
+    await _loadDeals();
     if (mounted) setState(() => _loading = false);
   }
 
@@ -87,6 +91,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _promos = await ref.read(apiClientProvider).getActivePromotions();
     } catch (_) {
       _promos = [];
+    }
+  }
+
+  /// Batch 3 deals of the day. Same rule as promos: any failure leaves
+  /// [_deals] empty and the section hidden — a deal is never invented.
+  Future<void> _loadDeals() async {
+    try {
+      _deals = await ref.read(apiClientProvider).getDealsToday();
+    } catch (_) {
+      _deals = [];
     }
   }
 
@@ -306,6 +320,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 extra: {'autoListen': true}),
                             tooltip: l.t('voice_search_hint'),
                           ),
+                          IconButton(
+                            icon: const Icon(Icons.qr_code_scanner),
+                            onPressed: () => context.push('/customer/scan-qr'),
+                            tooltip: l.t('scan_qr_code'),
+                          ),
                         ],
                       ),
                     ),
@@ -382,6 +401,76 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                     ),
                   ),
+                // Batch 3 — Deals of the day: ONLY real deals from
+                // GET /promotions/today. Hidden when there are none.
+                // Tapping a deal opens the request form with its promo
+                // code pre-filled (and validated there).
+                if (_deals.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.local_offer_outlined, size: 18),
+                        const SizedBox(width: 6),
+                        Text(l.t('deals_of_the_day'),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700, fontSize: 16)),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    height: 76,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      itemCount: _deals.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (_, i) {
+                        final deal = _deals[i];
+                        return GestureDetector(
+                          onTap: () => context.push('/customer/request',
+                              extra: {
+                                ..._requestExtra(),
+                                'initialPromoCode': deal.code,
+                              }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF7E6),
+                              border: Border.all(
+                                  color: const Color(0xFFC9A227)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(deal.code,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14)),
+                                Text(
+                                  deal.discountText.isNotEmpty
+                                      ? deal.discountText
+                                      : deal.title,
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Colors.black87),
+                                ),
+                                if (deal.endsToday)
+                                  Text(l.t('ends_today'),
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Color(0xFFB45309),
+                                          fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
                 // Batch 2 — category grid for the 5 launch categories.
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),

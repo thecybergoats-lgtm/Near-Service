@@ -34,7 +34,8 @@ class RequestFormScreen extends ConsumerStatefulWidget {
       this.categoryId,
       this.categorySlug,
       this.initialOffer,
-      this.initialDescription});
+      this.initialDescription,
+      this.initialPromoCode});
 
   final String? categoryId;
   final String? categorySlug;
@@ -42,6 +43,8 @@ class RequestFormScreen extends ConsumerStatefulWidget {
   final int? initialOffer;
   /// Batch 2 "Book again": pre-fill the description from the past job.
   final String? initialDescription;
+  /// Batch 3: tapping a deal of the day pre-fills its promo code.
+  final String? initialPromoCode;
 
   @override
   ConsumerState<RequestFormScreen> createState() => _RequestFormScreenState();
@@ -134,6 +137,11 @@ class _RequestFormScreenState extends ConsumerState<RequestFormScreen> {
         widget.initialDescription!.isNotEmpty) {
       _descController.text = widget.initialDescription!;
     }
+    // Batch 3: a deal's promo code is pre-filled and validated once the
+    // category resolves (validation needs the resolved category id).
+    if (widget.initialPromoCode != null && widget.initialPromoCode!.isNotEmpty) {
+      _promoController.text = widget.initialPromoCode!;
+    }
     _resolveCategory();
   }
 
@@ -151,6 +159,7 @@ class _RequestFormScreenState extends ConsumerState<RequestFormScreen> {
     });
     await _loadFairRange();
     await _loadSchema();
+    if (_promoController.text.trim().isNotEmpty) await _validatePromo();
   }
 
   Future<void> _loadFairRange() async {

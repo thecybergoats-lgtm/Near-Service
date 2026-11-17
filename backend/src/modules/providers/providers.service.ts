@@ -17,6 +17,38 @@ import { isOpenNow, AvailabilitySlot } from '../../common/utils/availability';
 import { cnicHmac, isValidCnic } from '../../common/utils/cnic';
 import { encryptField, decryptField } from '../../common/crypto/field-encryption';
 import { resolveCategoryId } from '../../common/utils/category-resolve';
+import { paisaToPkr } from '../../common/utils/money';
+
+/** One earnings period (Batch 3). All money in PKR — jobs store
+ *  final_price / commission_amount as PKR, unlike the wallet ledger
+ *  which is integer paisa. */
+export interface EarningsPeriod {
+  earnings_pkr: number;
+  commission_pkr: number;
+  completed_jobs: number;
+}
+
+export interface EarningsPayoutItem {
+  id: string;
+  amount_pkr: number;
+  fee_pkr: number;
+  destination: string;
+  status: string;
+  kind: string;
+  created_at: string;
+}
+
+export interface ProviderEarnings {
+  provider_id: string;
+  currency: 'PKR';
+  today: EarningsPeriod;
+  last_7_days: EarningsPeriod;
+  last_30_days: EarningsPeriod;
+  all_time: EarningsPeriod;
+  pending_payout_pkr: number;
+  wallet_balance_pkr: number;
+  payouts: EarningsPayoutItem[];
+}
 
 export interface NearbyQuery { lat: number; lng: number; category_id?: string; category_slug?: string; radius_km?: number; open_now?: boolean; verified_only?: boolean; }
 const DOC_TYPES = ['cnic_front', 'cnic_back', 'selfie', 'shop_photo', 'certificate'] as const;
@@ -256,6 +288,90 @@ export class ProvidersService {
       distance_km: null, eta_minutes: null, is_open_now: openNow,
       starting_price: services[0]?.starting_price ? Number(services[0].starting_price) : null, sponsored,
       services, reviews,
+    };
+  }
+
+  /** Batch 3: the caller's own provider profile (for the "My QR code"
+   *  screen — it needs the provider id to encode). Same not-found rule
+   *  as myProfileId: 403 when this account has no provider profile. */
+  async getMyProfile(userId: string) {
+    const p = (await this.db.query(
+      `SELECT id, display_name, shop_name, provider_type, tier, is_online, rating_avg, jobs_completed, created_at
+       FROM provider_profiles WHERE user_id=$1 AND deleted_at IS NULL`,
+      [userId],
+    )).rows[0] as unknown as Record<string, unknown> | undefined;
+    if (!p) throw Errors.forbidden('No provider profile for this account');
+    return {
+      id: p.id, display_name: p.display_name, shop_name: p.shop_name ?? null,
+      provider_type: p.provider_type, tier: p.tier, is_online: p.is_online,
+      rating_avg: Number(p.rating_avg), jobs_completed: Number(p.jobs_completed),
+      created_at: p.created_at,
+    };
+  }
+
+  /** Batch 3: provider earnings dashboard. Periods are calendar days in
+   *  Asia/Karachi (same convention as FIX 11 open-now). Earnings =
+   *  final_price − commission for SETTLED jobs only; pending payout =
+   *  final_price of COMPLETED-but-unpaid jobs (money earned, not yet
+   *  settled into the wallet). Payouts come from the payouts table via
+   *  the caller's wallet — a payout only exists once requested, so an
+   *  empty list is normal until the provider requests one. */
+  async getEarnings(userId: string): Promise<ProviderEarnings> {
+    const pid = await this.myProfileId(userId);
+    const r = (await this.db.query<Record<string, string>>(
+      `WITH bounds AS (
+         SELECT date_trunc('day', now() AT TIME ZONE 'Asia/Karachi') AT TIME ZONE 'Asia/Karachi' AS today_start
+       )
+       SELECT
+         COALESCE(SUM(CASE WHEN j.payment_status='settled' AND COALESCE(j.completed_at, j.updated_at) >= b.today_start THEN COALESCE(j.final_price,0) - COALESCE(j.commission_amount,0) ELSE 0 END),0) AS today_earnings,
+         COALESCE(SUM(CASE WHEN j.payment_status='settled' AND COALESCE(j.completed_at, j.updated_at) >= b.today_start THEN COALESCE(j.commission_amount,0) ELSE 0 END),0) AS today_commission,
+         COUNT(*) FILTER (WHERE j.payment_status='settled' AND COALESCE(j.completed_at, j.updated_at) >= b.today_start) AS today_jobs,
+         COALESCE(SUM(CASE WHEN j.payment_status='settled' AND COALESCE(j.completed_at, j.updated_at) >= b.today_start - interval '6 days' THEN COALESCE(j.final_price,0) - COALESCE(j.commission_amount,0) ELSE 0 END),0) AS week_earnings,
+         COALESCE(SUM(CASE WHEN j.payment_status='settled' AND COALESCE(j.completed_at, j.updated_at) >= b.today_start - interval '6 days' THEN COALESCE(j.commission_amount,0) ELSE 0 END),0) AS week_commission,
+         COUNT(*) FILTER (WHERE j.payment_status='settled' AND COALESCE(j.completed_at, j.updated_at) >= b.today_start - interval '6 days') AS week_jobs,
+         COALESCE(SUM(CASE WHEN j.payment_status='settled' AND COALESCE(j.completed_at, j.updated_at) >= b.today_start - interval '29 days' THEN COALESCE(j.final_price,0) - COALESCE(j.commission_amount,0) ELSE 0 END),0) AS month_earnings,
+         COALESCE(SUM(CASE WHEN j.payment_status='settled' AND COALESCE(j.completed_at, j.updated_at) >= b.today_start - interval '29 days' THEN COALESCE(j.commission_amount,0) ELSE 0 END),0) AS month_commission,
+         COUNT(*) FILTER (WHERE j.payment_status='settled' AND COALESCE(j.completed_at, j.updated_at) >= b.today_start - interval '29 days') AS month_jobs,
+         COALESCE(SUM(CASE WHEN j.payment_status='settled' THEN COALESCE(j.final_price,0) - COALESCE(j.commission_amount,0) ELSE 0 END),0) AS all_earnings,
+         COALESCE(SUM(CASE WHEN j.payment_status='settled' THEN COALESCE(j.commission_amount,0) ELSE 0 END),0) AS all_commission,
+         COUNT(*) FILTER (WHERE j.payment_status='settled') AS all_jobs,
+         COALESCE(SUM(CASE WHEN j.state='COMPLETED' AND j.payment_status='unpaid' THEN COALESCE(j.final_price,0) ELSE 0 END),0) AS pending_payout
+       FROM jobs j JOIN provider_profiles p ON p.id = j.provider_id CROSS JOIN bounds b
+       WHERE p.id = $1`,
+      [pid],
+    )).rows[0] as unknown as Record<string, string>;
+    const wallet = (await this.db.query<{ balance_paisa: string }>(
+      `SELECT balance_paisa FROM wallet_accounts WHERE user_id=$1`,
+      [userId],
+    )).rows[0] as unknown as { balance_paisa: string } | undefined;
+    const payouts = (await this.db.query(
+      `SELECT p.id, COALESCE(p.amount_paisa, (p.amount * 100)::bigint) AS amount_paisa,
+              COALESCE(p.fee_paisa, 0) AS fee_paisa, p.destination, p.status, p.kind, p.created_at
+       FROM payouts p JOIN wallet_accounts w ON w.id = p.wallet_id
+       WHERE w.user_id=$1 ORDER BY p.created_at DESC LIMIT 10`,
+      [userId],
+    )).rows as unknown as Record<string, unknown>[];
+    const period = (e: string, c: string, j: string): EarningsPeriod => ({
+      earnings_pkr: Number(r[e]), commission_pkr: Number(r[c]), completed_jobs: Number(r[j]),
+    });
+    return {
+      provider_id: pid,
+      currency: 'PKR',
+      today: period('today_earnings', 'today_commission', 'today_jobs'),
+      last_7_days: period('week_earnings', 'week_commission', 'week_jobs'),
+      last_30_days: period('month_earnings', 'month_commission', 'month_jobs'),
+      all_time: period('all_earnings', 'all_commission', 'all_jobs'),
+      pending_payout_pkr: Number(r.pending_payout),
+      wallet_balance_pkr: paisaToPkr(Number(wallet?.balance_paisa ?? 0)),
+      payouts: payouts.map((p) => ({
+        id: String(p.id),
+        amount_pkr: paisaToPkr(Number(p.amount_paisa ?? 0)),
+        fee_pkr: paisaToPkr(Number(p.fee_paisa ?? 0)),
+        destination: String(p.destination ?? ''),
+        status: String(p.status),
+        kind: String(p.kind ?? 'instant'),
+        created_at: String(p.created_at),
+      })),
     };
   }
 

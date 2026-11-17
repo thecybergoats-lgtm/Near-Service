@@ -426,6 +426,158 @@ class PromoItem {
       );
 }
 
+/// Own provider profile (GET /providers/me) — Batch 3. The `id` is what
+/// the "My QR code" screen encodes (see core/qr_code.dart).
+class MyProviderProfile {
+  final String id;
+  final String displayName;
+  final String? shopName;
+  final String providerType;
+  final int tier;
+  final bool isOnline;
+  final double ratingAvg;
+  final int jobsCompleted;
+
+  const MyProviderProfile({
+    required this.id,
+    required this.displayName,
+    this.shopName,
+    required this.providerType,
+    required this.tier,
+    required this.isOnline,
+    required this.ratingAvg,
+    required this.jobsCompleted,
+  });
+
+  factory MyProviderProfile.fromJson(Map<String, dynamic> j) => MyProviderProfile(
+        id: (j['id'] ?? '').toString(),
+        displayName: (j['display_name'] ?? '').toString(),
+        shopName: j['shop_name'] as String?,
+        providerType: (j['provider_type'] ?? '').toString(),
+        tier: (j['tier'] as num?)?.toInt() ?? 0,
+        isOnline: j['is_online'] == true,
+        ratingAvg: (j['rating_avg'] as num?)?.toDouble() ?? 0,
+        jobsCompleted: (j['jobs_completed'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// One earnings period (GET /providers/me/earnings) — Batch 3.
+class EarningsPeriod {
+  final double earningsPkr;
+  final double commissionPkr;
+  final int completedJobs;
+
+  const EarningsPeriod({
+    required this.earningsPkr,
+    required this.commissionPkr,
+    required this.completedJobs,
+  });
+
+  factory EarningsPeriod.fromJson(Map<String, dynamic> j) => EarningsPeriod(
+        earningsPkr: (j['earnings_pkr'] as num?)?.toDouble() ?? 0,
+        commissionPkr: (j['commission_pkr'] as num?)?.toDouble() ?? 0,
+        completedJobs: (j['completed_jobs'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// One payout in the earnings history (GET /providers/me/earnings).
+class EarningsPayout {
+  final String id;
+  final double amountPkr;
+  final double feePkr;
+  final String destination;
+  final String status;
+  final String kind;
+  final DateTime? createdAt;
+
+  const EarningsPayout({
+    required this.id,
+    required this.amountPkr,
+    required this.feePkr,
+    required this.destination,
+    required this.status,
+    required this.kind,
+    this.createdAt,
+  });
+
+  factory EarningsPayout.fromJson(Map<String, dynamic> j) => EarningsPayout(
+        id: (j['id'] ?? '').toString(),
+        amountPkr: (j['amount_pkr'] as num?)?.toDouble() ?? 0,
+        feePkr: (j['fee_pkr'] as num?)?.toDouble() ?? 0,
+        destination: (j['destination'] ?? '').toString(),
+        status: (j['status'] ?? '').toString(),
+        kind: (j['kind'] ?? 'instant').toString(),
+        createdAt: j['created_at'] == null ? null : DateTime.tryParse(j['created_at'].toString()),
+      );
+}
+
+/// Provider earnings dashboard (GET /providers/me/earnings) — Batch 3.
+/// Periods are calendar days in Asia/Karachi; earnings count SETTLED
+/// jobs only; pending payout is COMPLETED-but-unpaid jobs.
+class ProviderEarnings {
+  final String providerId;
+  final EarningsPeriod today;
+  final EarningsPeriod last7Days;
+  final EarningsPeriod last30Days;
+  final EarningsPeriod allTime;
+  final double pendingPayoutPkr;
+  final double walletBalancePkr;
+  final List<EarningsPayout> payouts;
+
+  const ProviderEarnings({
+    required this.providerId,
+    required this.today,
+    required this.last7Days,
+    required this.last30Days,
+    required this.allTime,
+    required this.pendingPayoutPkr,
+    required this.walletBalancePkr,
+    required this.payouts,
+  });
+
+  factory ProviderEarnings.fromJson(Map<String, dynamic> j) => ProviderEarnings(
+        providerId: (j['provider_id'] ?? '').toString(),
+        today: EarningsPeriod.fromJson((j['today'] as Map?)?.cast<String, dynamic>() ?? {}),
+        last7Days: EarningsPeriod.fromJson((j['last_7_days'] as Map?)?.cast<String, dynamic>() ?? {}),
+        last30Days: EarningsPeriod.fromJson((j['last_30_days'] as Map?)?.cast<String, dynamic>() ?? {}),
+        allTime: EarningsPeriod.fromJson((j['all_time'] as Map?)?.cast<String, dynamic>() ?? {}),
+        pendingPayoutPkr: (j['pending_payout_pkr'] as num?)?.toDouble() ?? 0,
+        walletBalancePkr: (j['wallet_balance_pkr'] as num?)?.toDouble() ?? 0,
+        payouts: ((j['payouts'] as List?) ?? [])
+            .map((e) => EarningsPayout.fromJson((e as Map).cast<String, dynamic>()))
+            .toList(),
+      );
+}
+
+/// One deal of the day (GET /promotions/today) — Batch 3. Only real
+/// active promos from the backend; the UI never invents a deal.
+class TodayDeal {
+  final String code;
+  final String title;
+  final String discountText;
+  final DateTime? validFrom;
+  final DateTime? validTo;
+  final bool endsToday;
+
+  const TodayDeal({
+    required this.code,
+    required this.title,
+    required this.discountText,
+    this.validFrom,
+    this.validTo,
+    required this.endsToday,
+  });
+
+  factory TodayDeal.fromJson(Map<String, dynamic> j) => TodayDeal(
+        code: (j['code'] ?? '').toString(),
+        title: (j['title'] ?? '').toString(),
+        discountText: (j['discount_text'] ?? j['discountText'] ?? '').toString(),
+        validFrom: j['valid_from'] == null ? null : DateTime.tryParse(j['valid_from'].toString()),
+        validTo: j['valid_to'] == null ? null : DateTime.tryParse(j['valid_to'].toString()),
+        endsToday: j['ends_today'] == true,
+      );
+}
+
 /// One public provider review (GET /providers/:id/reviews).
 /// `photos` are storage keys or URLs as returned by the backend; the
 /// UI shows a network image only for http(s) values and a photo chip

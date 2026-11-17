@@ -37,6 +37,11 @@ export class ProvidersController {
   @Public() @RateLimit('nearby') @Get('nearby') nearby(@Query() q: NearbyQueryDto) {
     return this.svc.nearby({ lat: q.lat, lng: q.lng, category_id: q.category_id, category_slug: q.category_slug, radius_km: q.radius_km, open_now: q.open_now ?? false, verified_only: q.verified_only ?? false, cursor: q.cursor, limit: q.limit });
   }
+  // Batch 3: own profile (for the "My QR code" screen) and earnings
+  // dashboard. Registered BEFORE ':id' so '/providers/me' is not
+  // captured by the public :id route (uuidParamPipe would 422 'me').
+  @Roles('provider') @Get('me') myProfile(@CurrentUser() u: AuthUser) { return this.svc.getMyProfile(u.id); }
+  @Roles('provider') @Get('me/earnings') myEarnings(@CurrentUser() u: AuthUser) { return this.svc.getEarnings(u.id); }
   @Roles('provider') @Get('me/services') myServices(@CurrentUser() u: AuthUser) { return this.svc.getMyServices(u.id); }
   @Roles('provider') @Put('me/services') updateMyServices(@CurrentUser() u: AuthUser, @Body() dto: ServicesDto) { return this.svc.updateMyServices(u.id, dto.services); }
   @Roles('provider') @Put('me/service-area') updateServiceArea(@CurrentUser() u: AuthUser, @Body() dto: ServiceAreaDto) { return this.svc.updateServiceArea(u.id, dto); }

@@ -153,6 +153,40 @@ export class PromotionsService {
     return { items };
   }
 
+  /** Batch 3: "Deals of the day" — the same active promos as
+   *  listActivePromos (same table, same validity window, no parallel
+   *  system), plus valid_from/valid_to and ends_today so the home
+   *  section can highlight deals expiring today. Admins create a deal
+   *  for today with POST /admin/promos and valid_from/valid_to set to
+   *  today; first_job_only promos (e.g. FIRSTJOB10) are included too
+   *  — eligibility is still checked at validation time, not here.
+   *  ends_today compares the valid_to date in Asia/Karachi. */
+  async listTodayDeals(): Promise<{ items: { code: string; title: string; discount_text: string; valid_from: string | null; valid_to: string | null; ends_today: boolean }[] }> {
+    const rows = (await this.db.query<PromoRow>(
+      `SELECT * FROM promos WHERE is_active AND (valid_from IS NULL OR valid_from <= now()) AND (valid_to IS NULL OR valid_to >= now()) ORDER BY valid_to ASC NULLS LAST, code ASC`,
+    )).rows as unknown as PromoRow[];
+    const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Karachi', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const todayPkt = dayFmt.format(new Date());
+    const items: { code: string; title: string; discount_text: string; valid_from: string | null; valid_to: string | null; ends_today: boolean }[] = [];
+    for (const r of rows) {
+      if (r.max_uses !== null && r.max_uses !== undefined) {
+        const used = Number(((await this.db.query<{ cnt: string }>(
+          `SELECT COUNT(*) AS cnt FROM promo_redemptions WHERE promo_id=$1`, [r.id])).rows[0] as unknown as { cnt: string }).cnt);
+        if (used >= r.max_uses) continue;
+      }
+      const discountText = r.kind === 'percent'
+        ? `${Number(r.value)}% off`
+        : r.kind === 'fixed' ? `PKR ${Number(r.value)} off` : '';
+      items.push({
+        code: r.code, title: r.code, discount_text: discountText,
+        valid_from: r.valid_from ? new Date(r.valid_from).toISOString() : null,
+        valid_to: r.valid_to ? new Date(r.valid_to).toISOString() : null,
+        ends_today: r.valid_to ? dayFmt.format(new Date(r.valid_to)) === todayPkt : false,
+      });
+    }
+    return { items };
+  }
+
   // ---- Referrals -------------------------------------------------------
   async getReferralInfo(userId: string): Promise<ReferralInfo> {
     const rows = (await this.db.query<{ status: string; credit_paisa: string }>(

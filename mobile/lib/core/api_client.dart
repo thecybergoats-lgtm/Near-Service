@@ -2006,6 +2006,30 @@ class ApiClient implements PartnerApi {
     return list.map((e) => PromoItem.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  /// GET /promotions/today (public) — Batch 3 "Deals of the day".
+  Future<List<TodayDeal>> getDealsToday() async {
+    final res = await _send((h) => _http.get(_u('/promotions/today'), headers: h));
+    if (res.statusCode != 200) _throwError(res);
+    final body = _decode(res);
+    final list = (body is Map ? body['items'] ?? [] : []) as List;
+    return list.map((e) => TodayDeal.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// GET /providers/me — Batch 3: the provider's own profile (its id is
+  /// what the "My QR code" screen encodes).
+  Future<MyProviderProfile> getMyProviderProfile() async {
+    final res = await _send((h) => _http.get(_u('/providers/me'), headers: h));
+    if (res.statusCode != 200) _throwError(res);
+    return MyProviderProfile.fromJson(_decode(res) as Map<String, dynamic>);
+  }
+
+  /// GET /providers/me/earnings — Batch 3: provider earnings dashboard.
+  Future<ProviderEarnings> getProviderEarnings() async {
+    final res = await _send((h) => _http.get(_u('/providers/me/earnings'), headers: h));
+    if (res.statusCode != 200) _throwError(res);
+    return ProviderEarnings.fromJson(_decode(res) as Map<String, dynamic>);
+  }
+
   /// GET /providers/:id/reviews — public, paginated {items, next_cursor}.
   /// Each review carries `photos: string[]` (Batch 2).
   Future<({List<ProviderReview> items, String? nextCursor})> getProviderReviews(String providerId, {String? cursor}) async {

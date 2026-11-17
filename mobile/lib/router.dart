@@ -22,6 +22,7 @@ import 'features/customer/offers_screen.dart';
 import 'features/customer/payment_screen.dart';
 import 'features/customer/provider_list_screen.dart';
 import 'features/customer/provider_profile_screen.dart';
+import 'features/customer/qr_scan_screen.dart';
 import 'features/customer/profile_screen.dart';
 import 'features/customer/rating_screen.dart';
 import 'features/customer/request_form_screen.dart';
@@ -42,6 +43,7 @@ import 'features/provider/subscription_screen.dart';
 import 'features/provider/teams_screen.dart';
 import 'features/provider/verification_screen.dart';
 import 'features/provider/my_services_screen.dart';
+import 'features/provider/qr_code_screen.dart';
 import 'features/provider/onboarding_wizard.dart';
 import 'features/provider/service_area_screen.dart';
 
@@ -89,6 +91,8 @@ GoRouter buildRouter() {
             categorySlug: extra['categorySlug'] as String?,
             initialOffer: extra['initialOffer'] as int?,
             initialDescription: extra['initialDescription'] as String?,
+            // Batch 3: tapping a deal of the day pre-fills its promo code.
+            initialPromoCode: extra['initialPromoCode'] as String?,
           );
         },
       ),
@@ -188,6 +192,9 @@ GoRouter buildRouter() {
         builder: (_, state) => AdjustmentScreen(jobId: state.pathParameters['jobId'] ?? ''),
       ),
       GoRoute(path: '/provider/earnings', builder: (_, __) => const EarningsScreen()),
+      // Batch 3: provider QR code + customer QR scanner.
+      GoRoute(path: '/provider/qr-code', builder: (_, __) => const QrCodeScreen()),
+      GoRoute(path: '/customer/scan-qr', builder: (_, __) => const QrScanScreen()),
       // Phase 3 — subscription, teams, verification, escrow & payouts.
       GoRoute(path: '/provider/subscription', builder: (_, __) => const SubscriptionScreen()),
       GoRoute(path: '/provider/teams', builder: (_, __) => const TeamsScreen()),

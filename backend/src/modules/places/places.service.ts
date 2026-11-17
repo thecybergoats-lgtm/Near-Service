@@ -31,7 +31,7 @@ import { Errors } from '../../common/errors/api-error';
 
 export const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 export const OVERPASS_USER_AGENT = 'NearService/1.0 (https://near-service.example)';
-export const OVERPASS_TIMEOUT_MS = 25000;
+export const OVERPASS_TIMEOUT_MS = 50000;
 export const PLACES_CACHE_TTL_SECONDS = 900; // 15 minutes
 export const PLACES_MAX_ITEMS = 50;
 
@@ -121,7 +121,7 @@ export function buildOverpassQuery(
   const stmts = tags
     .map((t) => `node["${t.key}"="${t.value}"](around:${radiusM},${lat},${lng});`)
     .join('');
-  return `[out:json][timeout:25];(${stmts});out 100;`;
+  return `[out:json][timeout:50];(${stmts});out 100;`;
 }
 
 /** Map raw Overpass elements to sorted PlaceShop items. Dedupes by node id

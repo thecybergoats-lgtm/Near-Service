@@ -171,6 +171,17 @@ class _ProviderDashboardScreenState extends ConsumerState<ProviderDashboardScree
             ),
           ),
           const SizedBox(height: 8),
+          // Batch 3: provider QR code — customers scan it to open
+          // this provider's profile.
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => context.push('/provider/qr-code'),
+              icon: const Icon(Icons.qr_code),
+              label: const Text('My QR code'),
+            ),
+          ),
+          const SizedBox(height: 8),
           // FIX 10 — provider "me" settings.
           SizedBox(
             width: double.infinity,

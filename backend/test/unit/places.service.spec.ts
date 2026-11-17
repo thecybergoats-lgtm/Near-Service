@@ -60,7 +60,7 @@ describe('places mapping (pure helpers)', () => {
 
   it('builds an Overpass query with the required selectors', () => {
     const q = buildOverpassQuery(CATEGORY_OSM_TAGS['book-binding'], 30.18, 66.975, 20000);
-    expect(q).toContain('[out:json][timeout:25]');
+    expect(q).toContain('[out:json][timeout:50]');
     expect(q).toContain('node["shop"="stationery"](around:20000,30.18,66.975)');
     expect(q).toContain('node["craft"="bookbinder"](around:20000,30.18,66.975)');
   });
@@ -203,7 +203,9 @@ describe('places service (mocked Overpass + stub Redis)', () => {
       );
       svc.fetchImpl = hanging as unknown as typeof fetch;
       const p = svc.nearby({ lat: 30.18, lng: 66.975, category_slug: 'book-binding' });
-      await jest.advanceTimersByTimeAsync(25000);
+      // Batch 3: the service timeout is 50 s (raised from 25 s — Overpass
+      // was taking ~28–37 s, so the old timeout aborted live queries).
+      await jest.advanceTimersByTimeAsync(50000);
       const res = await p;
       expect(res).toEqual({ items: [], source: 'openstreetmap', degraded: true });
     } finally {

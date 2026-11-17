@@ -23,6 +23,8 @@ class EarningsScreen extends ConsumerStatefulWidget {
 
 class _EarningsScreenState extends ConsumerState<EarningsScreen> {
   WalletInfo? _wallet;
+  ProviderEarnings? _earnings;
+  bool _earningsUnavailable = false;
   final List<WalletTransaction> _txns = [];
   String? _txnCursor;
   bool _loading = true;
@@ -45,9 +47,21 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
       final wallet = await ref.read(apiClientProvider).getWallet();
       final page =
           await ref.read(apiClientProvider).getWalletTransactions(limit: 20);
+      // Batch 3: earnings dashboard (today / 7 days / 30 days / all time).
+      // A 403 here (account without a provider profile) hides only the
+      // dashboard cards — the wallet below still loads.
+      ProviderEarnings? earnings;
+      var earningsUnavailable = false;
+      try {
+        earnings = await ref.read(apiClientProvider).getProviderEarnings();
+      } on ApiException {
+        earningsUnavailable = true;
+      }
       if (!mounted) return;
       setState(() {
         _wallet = wallet;
+        _earnings = earnings;
+        _earningsUnavailable = earningsUnavailable;
         _txns
           ..clear()
           ..addAll(page.items);
@@ -102,6 +116,77 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
                   if (_offline) const OfflineBanner(isDemo: true),
                   if (_error != null && _txns.isEmpty)
                     ErrorState(message: _error!, onRetry: _load),
+                  // Batch 3: earnings dashboard — today / 7 days /
+                  // 30 days / all time (SETTLED jobs only), pending
+                  // payout, and payout history. Hidden only when the
+                  // account has no provider profile.
+                  if (_earnings != null) ...[
+                    const Text('Earnings dashboard',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 16)),
+                    const SizedBox(height: 8),
+                    _PeriodRow(label: 'Today', period: _earnings!.today),
+                    _PeriodRow(
+                        label: 'Last 7 days', period: _earnings!.last7Days),
+                    _PeriodRow(
+                        label: 'Last 30 days', period: _earnings!.last30Days),
+                    _PeriodRow(label: 'All time', period: _earnings!.allTime),
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.hourglass_top_outlined),
+                        title: const Text('Pending payout'),
+                        subtitle: const Text(
+                            'COMPLETED jobs not yet settled into your wallet.'),
+                        trailing: Text(
+                          Money.pkr(_earnings!.pendingPayoutPkr.round()),
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Payout history',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 16)),
+                    const SizedBox(height: 8),
+                    if (_earnings!.payouts.isEmpty)
+                      const Card(
+                        child: ListTile(
+                          title: Text('No payouts yet'),
+                          subtitle: Text(
+                              'Request a payout from the wallet screen and it will appear here.'),
+                        ),
+                      )
+                    else
+                      ..._earnings!.payouts.map((p) => Card(
+                            child: ListTile(
+                              leading: const Icon(Icons.account_balance),
+                              title: Text(
+                                  '${Money.pkr(p.amountPkr.round())} — ${p.destination}'),
+                              subtitle: p.createdAt == null
+                                  ? null
+                                  : Text(
+                                      p.createdAt!
+                                          .toLocal()
+                                          .toString()
+                                          .substring(0, 16),
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                              trailing: Text(
+                                p.status,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          )),
+                    const SizedBox(height: 24),
+                  ] else if (_earningsUnavailable)
+                    const Card(
+                      child: ListTile(
+                        title: Text('Earnings dashboard unavailable'),
+                        subtitle: Text(
+                            'This account has no provider profile yet — finish provider onboarding to see earnings.'),
+                      ),
+                    ),
                   Card(
                     color: const Color(0xFF134E4A),
                     child: Padding(
@@ -250,6 +335,31 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// One earnings period row (Batch 3): earnings, completed jobs and
+/// commission deducted for the period.
+class _PeriodRow extends StatelessWidget {
+  const _PeriodRow({required this.label, required this.period});
+
+  final String label;
+  final EarningsPeriod period;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        title: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+        subtitle: Text(
+          '${period.completedJobs} jobs · Commission ${Money.pkr(period.commissionPkr.round())}',
+        ),
+        trailing: Text(
+          Money.pkr(period.earningsPkr.round()),
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+        ),
+      ),
     );
   }
 }

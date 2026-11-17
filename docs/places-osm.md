@@ -52,7 +52,11 @@ logged and the live fetch runs (see `RedisService` in-memory fallback).
 - The server returns HTTP 406 unless the request carries a `User-Agent`
   AND an `Accept: application/json` header. Both are set on every call.
 - The query is POSTed as form data (`data=<Overpass QL>`).
-- Query timeout is 25 s server-side and 25 s client-side (AbortController).
+- Query timeout is 50 s server-side and 50 s client-side (AbortController).
+  Raised from 25 s in Batch 3: Overpass was taking ~28–37 s (or 502) at
+  peak, so the endpoint almost always degraded with no shops even though
+  the 5 Quetta shops exist. Degraded fallback is unchanged (HTTP 200
+  `{items: [], degraded: true}`, never 500; degraded results are not cached).
 - Coverage is whatever volunteers mapped. Quetta centre (30.18, 66.975),
   20 km, stationery/books/bookbinder returned 5 real shops
   (Honar stationary, Azhari stationary, N.B.D Book Shop, Nashaqbandia

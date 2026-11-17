@@ -47,6 +47,10 @@ export class PromotionsController {
   // home banner. No auth — the banner renders before login.
   @Public() @Get('promotions/active') activePromos() { return this.svc.listActivePromos(); }
 
+  // Batch 3: "Deals of the day" — same active promos, with validity
+  // window + ends_today for the home deals section. Public, read-only.
+  @Public() @Get('promotions/today') todayDeals() { return this.svc.listTodayDeals(); }
+
   // Validation is side-effect free — no redemption is recorded here.
   @Post('promos/validate') @HttpCode(200) validate(
     @CurrentUser() u: AuthUser,

@@ -1,10 +1,10 @@
-# Near Service API — OpenAPI 3.1, version 1.8.0 (v1.7.0 + Batch 2 trust & safety: favourites, photo reviews, live support, push plumbing, promo listing, customer-confirms-completion, pickup-time / no-show).
+# Near Service API — OpenAPI 3.1, version 1.9.0 (v1.8.0 + Batch 3: provider earnings dashboard, own provider profile, deals of the day, Overpass timeout 25 s to 50 s).
 # Source of truth for the contract test (test/contract/api.contract.spec.ts):
 # the set of (method, path) here must equal the routes registered by the Nest app.
 openapi: 3.1.0
 info:
   title: Near Service API
-  version: 1.8.0
+  version: 1.9.0
   description: 'OpenAPI 3.1 skeleton for the Near Service Phase 1 (MVP) endpoints. Companion to the Phase 0 PRD v1.1. Phase 2 endpoints (wallet, payment intents, payouts, escrow) are intentionally excluded
     and will extend this file. Identifier rule (v1.1): category_id is always a UUID (format: uuid). A client may instead send category_slug; the API resolves the slug to its UUID and echoes the canonical
     UUID in every response.
@@ -26,7 +26,8 @@ info:
 
     v1.6 changes (Phase 4): search scale-out (SearchModule providers + metrics/gate admin endpoints + POST /search/click for CTR), analytics warehouse (ETL run/status, funnel, revenue, supply-demand, CSV exports subject to legal review), multi-city ops (admin city CRUD, targets, gate config/evaluations, status, manager assignment, checklist, category overrides, effective commission, commission rules, fair price) + public SEO landing/shop pages (server-rendered HTML), warranty product (opt-in, fee quote/collection at settlement, claims state machine, admin review, config, versioned rules, expiry sweep), partner integrations (parts catalog + orders with affiliate fee and in-app disclosure, admin partner/catalog/order management, fee report). No scheduler exists in this repo: the analytics ETL (02:00 PKT) and warranty expiry sweep run from an external scheduler; see docs/phase4-api-addendum.md.
 
-    v1.8 changes (Batch 2, trust & safety): the spec is now 243 paths / 272 operations (+14 paths / +19 ops): favourites (POST/DELETE /providers/{providerId}/favourite, GET /favourites); photo reviews (photo_keys on POST /jobs/{jobId}/reviews, POST /jobs/{jobId}/reviews/upload-request, photos on provider reviews); live support tickets (POST/GET /support/threads, GET/POST /support/threads/{threadId}/messages, GET /admin/support/threads, POST /admin/support/threads/{threadId}/messages, POST /admin/support/threads/{threadId}/close — no fake agent replies, an unanswered thread stays open); push plumbing (POST /devices/register, GET/PATCH /users/me/notification-preferences — FCM sends only when FCM_SERVICE_ACCOUNT_JSON is configured, otherwise the no-op provider logs + skips, never 500s); public GET /promotions/active for the home banner; customer-confirms-completion (POST /jobs/{jobId}/complete is now provider-only, new POST /jobs/{jobId}/confirm-completion, confirmPayment/wallet-pay/escrow-release blocked until completion_confirmed_at, POST /admin/jobs/auto-confirm-completions sweep with feature_flags completion_confirm_window_hours default 48); pickup-time commitment (optional scheduled_at on POST /offers/{offerId}/accept, must be in the future) and POST /jobs/{jobId}/report-no-show (customer-only, after scheduled_at, increments provider no_show_count + a no_show risk event). See docs/batch2-api-addendum.md and docs/push-notifications-setup.md.'
+    v1.8 changes (Batch 2, trust & safety): the spec is now 243 paths / 272 operations (+14 paths / +19 ops): favourites (POST/DELETE /providers/{providerId}/favourite, GET /favourites); photo reviews (photo_keys on POST /jobs/{jobId}/reviews, POST /jobs/{jobId}/reviews/upload-request, photos on provider reviews); live support tickets (POST/GET /support/threads, GET/POST /support/threads/{threadId}/messages, GET /admin/support/threads, POST /admin/support/threads/{threadId}/messages, POST /admin/support/threads/{threadId}/close — no fake agent replies, an unanswered thread stays open); push plumbing (POST /devices/register, GET/PATCH /users/me/notification-preferences — FCM sends only when FCM_SERVICE_ACCOUNT_JSON is configured, otherwise the no-op provider logs + skips, never 500s); public GET /promotions/active for the home banner; customer-confirms-completion (POST /jobs/{jobId}/complete is now provider-only, new POST /jobs/{jobId}/confirm-completion, confirmPayment/wallet-pay/escrow-release blocked until completion_confirmed_at, POST /admin/jobs/auto-confirm-completions sweep with feature_flags completion_confirm_window_hours default 48); pickup-time commitment (optional scheduled_at on POST /offers/{offerId}/accept, must be in the future) and POST /jobs/{jobId}/report-no-show (customer-only, after scheduled_at, increments provider no_show_count + a no_show risk event). See docs/batch2-api-addendum.md and docs/push-notifications-setup.md.
+    v1.9 changes (Batch 3): the spec is now 246 paths / 275 operations (+3 paths / +3 ops): provider earnings dashboard (GET /providers/me/earnings — today / last 7 days / last 30 days / all-time earnings, commission and completed jobs for SETTLED jobs only, pending payout for COMPLETED-but-unpaid jobs, wallet balance, payout history); own provider profile (GET /providers/me — the id the "My QR code" screen encodes); deals of the day (public GET /promotions/today — same active promos as /promotions/active, plus valid_from/valid_to and ends_today). No new tables; the Overpass timeout change (25 s to 50 s) is server behaviour, not a schema change. See docs/batch3-api-addendum.md and docs/provider-qr-code.md.'
   contact:
     name: Near Service engineering
 servers:
@@ -2915,6 +2916,158 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ActivePromo'
+    MyProviderProfile:
+      type: object
+      required:
+      - id
+      - display_name
+      - provider_type
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: provider_profiles.id — the value encoded in the provider QR code.
+        display_name:
+          type: string
+        shop_name:
+          type: string
+          nullable: true
+        provider_type:
+          type: string
+          enum:
+          - INDIVIDUAL
+          - SHOP
+        tier:
+          type: integer
+        is_online:
+          type: boolean
+        rating_avg:
+          type: number
+        jobs_completed:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    EarningsPeriod:
+      type: object
+      required:
+      - earnings_pkr
+      - commission_pkr
+      - completed_jobs
+      properties:
+        earnings_pkr:
+          type: number
+          description: Sum of (final_price − commission_amount) for SETTLED jobs in the period.
+        commission_pkr:
+          type: number
+          description: Sum of commission_amount for SETTLED jobs in the period.
+        completed_jobs:
+          type: integer
+          description: Count of SETTLED jobs in the period.
+    EarningsPayout:
+      type: object
+      required:
+      - id
+      - amount_pkr
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        amount_pkr:
+          type: number
+        fee_pkr:
+          type: number
+        destination:
+          type: string
+          description: Payout destination label (e.g. JazzCash).
+        status:
+          type: string
+          description: requested / approved / executed / rejected.
+        kind:
+          type: string
+          enum:
+          - instant
+          - scheduled
+        created_at:
+          type: string
+          format: date-time
+    ProviderEarnings:
+      type: object
+      required:
+      - provider_id
+      - currency
+      - today
+      - last_7_days
+      - last_30_days
+      - all_time
+      - pending_payout_pkr
+      - wallet_balance_pkr
+      - payouts
+      properties:
+        provider_id:
+          type: string
+          format: uuid
+        currency:
+          type: string
+          enum:
+          - PKR
+        today:
+          $ref: '#/components/schemas/EarningsPeriod'
+        last_7_days:
+          $ref: '#/components/schemas/EarningsPeriod'
+        last_30_days:
+          $ref: '#/components/schemas/EarningsPeriod'
+        all_time:
+          $ref: '#/components/schemas/EarningsPeriod'
+        pending_payout_pkr:
+          type: number
+          description: Sum of final_price for COMPLETED-but-unpaid jobs (earned, not yet settled).
+        wallet_balance_pkr:
+          type: number
+          description: Wallet balance in PKR (ledger is integer paisa).
+        payouts:
+          type: array
+          description: Latest 10 payouts for this provider (empty until one is requested).
+          items:
+            $ref: '#/components/schemas/EarningsPayout'
+    TodayDeal:
+      type: object
+      required:
+      - code
+      - title
+      - discount_text
+      - ends_today
+      properties:
+        code:
+          type: string
+          description: The promo code (e.g. FIRSTJOB10).
+        title:
+          type: string
+          description: Display title — echoes the code (the promos table has no title column).
+        discount_text:
+          type: string
+          description: Derived from kind/value, e.g. "10% off" or "PKR 500 off".
+        valid_from:
+          type: string
+          format: date-time
+          nullable: true
+        valid_to:
+          type: string
+          format: date-time
+          nullable: true
+        ends_today:
+          type: boolean
+          description: True when valid_to falls on today in Asia/Karachi.
+    TodayDealList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TodayDeal'
     OnboardingStep:
       type: object
       required:
@@ -6796,6 +6949,40 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /providers/me:
+    get:
+      tags:
+      - Providers
+      operationId: getMyProviderProfile
+      summary: 'Batch 3: the caller''s own provider profile (the id the "My QR code" screen encodes). 403 when this account has no provider profile.'
+      responses:
+        '200':
+          description: Own provider profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyProviderProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /providers/me/earnings:
+    get:
+      tags:
+      - Providers
+      operationId: getMyProviderEarnings
+      summary: 'Batch 3: provider earnings dashboard — today / last 7 days / last 30 days / all-time earnings, commission and completed jobs for SETTLED jobs only (periods are calendar days in Asia/Karachi), pending payout for COMPLETED-but-unpaid jobs, wallet balance, and the latest 10 payouts. An empty payouts list is normal until the provider requests a payout.'
+      responses:
+        '200':
+          description: Earnings summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderEarnings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /providers/me/services:
     get:
       tags:
@@ -7860,6 +8047,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ActivePromoList'
+  /promotions/today:
+    get:
+      tags:
+      - Profile
+      operationId: listTodayDeals
+      summary: 'Batch 3: "Deals of the day" — the same active promos as /promotions/active (same table, same validity window, no parallel system), plus valid_from/valid_to and ends_today so the home section can highlight deals expiring today. Public, read-only.'
+      security: []
+      responses:
+        '200':
+          description: Today's deals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TodayDealList'
   /promos/validate:
     post:
       tags:
