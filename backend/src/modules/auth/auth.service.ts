@@ -39,10 +39,23 @@ export class AuthService {
     if (count > env.otpMaxAttemptsPerPhonePerHour) throw Errors.rateLimited('Too many OTP requests for this phone');
     const code = generateOtpCode();
     const ttl = env.otpTtlSeconds;
+    // TEMPORARY PILOT LOGIN (remove before public launch): when the request
+    // is for the single allowlisted owner phone, store the hash of the
+    // configured pilot code instead of a random one. The code is NEVER
+    // returned or logged; verify, lockout, rate-limit and TTL behaviour
+    // are identical to a normal OTP. The real path is Firebase phone auth
+    // / SMS gateway (PRD p.4).
+    const isPilotPhone =
+      !!env.pilotLoginPhone &&
+      !!env.pilotLoginCode &&
+      normalizePhone(phone) === normalizePhone(env.pilotLoginPhone);
+    const storedCode = isPilotPhone ? env.pilotLoginCode! : code;
     // FIX 3(f): keyed HMAC-SHA256, not bcrypt.
-    await this.redis.set(`otp:${phone}`, hashOtp(code), ttl);
+    await this.redis.set(`otp:${phone}`, hashOtp(storedCode), ttl);
     if (deviceFingerprint) await this.redis.set(`otp:device:${deviceFingerprint}`, phone, ttl);
-    if (env.otpDevMode && !env.isProduction) {
+    if (isPilotPhone) {
+      this.logger.warn(`[PILOT OTP] pilot login code issued for allowlisted phone ${phone} — TEMPORARY, remove before launch (code never logged)`);
+    } else if (env.otpDevMode && !env.isProduction) {
       // DEV MODE ONLY — clearly labelled. No SMS is sent. Production uses
       // Firebase phone auth / SMS gateway (PRD p.4). FIX 15(b): the OTP
       // code itself is NEVER logged, not even in dev — it used to be

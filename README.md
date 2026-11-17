@@ -111,6 +111,7 @@ Generate fresh values — never reuse the dev placeholders. Secrets are
 | `CNIC_PEPPER` | `openssl rand -base64 32` (HMAC pepper for `cnic_hmac`; never log, never store in the DB) |
 | `OTP_HASH_SECRET` | `openssl rand -base64 32` |
 | `FIELD_ENCRYPTION_KEY` | Base64 of exactly 32 bytes: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` (AES-256-GCM; rotate via `FIELD_ENCRYPTION_KEY_V2`, same format) |
+| `PILOT_LOGIN_PHONE` / `PILOT_LOGIN_CODE` | **TEMPORARY PILOT ONLY — remove before public launch.** A single allowlisted owner phone (e.g. `+923333079204`) + a fixed 6-digit code, so the app can be tested end-to-end before an SMS provider exists. The code is never returned or logged; verify/lockout/TTL behaviour is identical to a normal OTP. The real path is Firebase phone auth / SMS gateway (PRD p.4). Unset both vars to disable the pilot path entirely. |
 | `CORS_ORIGINS` | The admin origin only, e.g. `https://admin.nearservice.pk` (empty = no browser origin allowed) |
 | `BACKEND_IMAGE` | ECR URL + tag, e.g. `<account>.dkr.ecr.ap-south-1.amazonaws.com/near-service/backend:<tag>` |
 | `ADMIN_IMAGE` | ECR URL + tag, same pattern as above |

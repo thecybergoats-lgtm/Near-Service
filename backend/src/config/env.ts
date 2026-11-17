@@ -37,6 +37,15 @@ const envSchema = z
       .string()
       .optional()
       .transform((v) => v === 'true'),
+    // TEMPORARY PILOT LOGIN (remove before public launch): a single
+    // allowlisted owner phone + a fixed 6-digit code, so the app can be
+    // tested end-to-end before an SMS provider exists. Both must be set
+    // together; when unset the pilot path is fully inactive. The code is
+    // never returned to the client and never logged — requestOtp stores
+    // only its HMAC hash, exactly like a random OTP. The real path is
+    // Firebase phone auth / SMS gateway (PRD p.4).
+    PILOT_LOGIN_PHONE: z.string().optional(),
+    PILOT_LOGIN_CODE: z.string().optional(),
     OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
     OTP_MAX_ATTEMPTS_PER_PHONE_PER_HOUR: z.coerce.number().int().positive().default(5),
     // FIX 9 (Stage 2): per-endpoint rate limits (fixed windows). The guard
@@ -140,6 +149,33 @@ const envSchema = z
         });
       }
     }
+    // TEMPORARY PILOT LOGIN: both vars together or neither; the code must
+    // be exactly 6 digits and the phone a Pakistani mobile number.
+    if (v.PILOT_LOGIN_PHONE !== undefined || v.PILOT_LOGIN_CODE !== undefined) {
+      if (!v.PILOT_LOGIN_PHONE || !v.PILOT_LOGIN_CODE) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['PILOT_LOGIN_CODE'],
+          message: 'PILOT_LOGIN_PHONE and PILOT_LOGIN_CODE must be set together',
+        });
+      } else {
+        if (!/^\d{6}$/.test(v.PILOT_LOGIN_CODE)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['PILOT_LOGIN_CODE'],
+            message: 'PILOT_LOGIN_CODE must be exactly 6 digits',
+          });
+        }
+        const digits = v.PILOT_LOGIN_PHONE.replace(/[\s-]/g, '');
+        if (!/^\+923\d{9}$/.test(digits) && !/^923\d{9}$/.test(digits) && !/^03\d{9}$/.test(digits)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['PILOT_LOGIN_PHONE'],
+            message: 'PILOT_LOGIN_PHONE must be a Pakistani mobile number (+92 3XX XXXXXXX)',
+          });
+        }
+      }
+    }
   })
   .transform((v) => {
     const prod = v.NODE_ENV === 'production';
@@ -159,6 +195,9 @@ const envSchema = z
       // OTP dev mode: defaults to false. Even an explicit 'true' is
       // neutralised in production by callers (codes are never logged there).
       otpDevMode: v.OTP_DEV_MODE,
+      // TEMPORARY PILOT LOGIN (remove before public launch).
+      pilotLoginPhone: v.PILOT_LOGIN_PHONE ?? null,
+      pilotLoginCode: v.PILOT_LOGIN_CODE ?? null,
       otpTtlSeconds: v.OTP_TTL_SECONDS,
       otpMaxAttemptsPerPhonePerHour: v.OTP_MAX_ATTEMPTS_PER_PHONE_PER_HOUR,
       // FIX 9: per-endpoint limits as { limit, windowSeconds } pairs.
