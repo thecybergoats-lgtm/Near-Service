@@ -93,10 +93,12 @@ class TierBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const labels = ['Unverified', 'ID Verified', 'Verified', 'Trusted Pro'];
-    const colors = [
-      AppColors.secondaryText,
+    final scheme = Theme.of(context).colorScheme;
+    // Theme-aware: the old fixed greys were unreadable on dark cards.
+    final colors = [
+      scheme.onSurfaceVariant,
       AppColors.accent,
-      AppColors.primary,
+      scheme.primary,
       AppColors.success,
     ];
     final i = tier.clamp(0, 3);
@@ -144,6 +146,10 @@ class ProviderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Theme-aware secondary colours: the old fixed greys were unreadable
+    // on dark cards (Batch 4).
+    final scheme = Theme.of(context).colorScheme;
+    final secondary = scheme.onSurfaceVariant;
     return Card(
       child: InkWell(
         onTap: onTap,
@@ -153,6 +159,10 @@ class ProviderCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Header: avatar + name + rating. The name gets its own
+              // full-width line (maxLines 1 + ellipsis) — the old layout
+              // squeezed it between avatar, badge and heart until it
+              // wrapped letter-by-letter (Batch 4 bug report).
               Row(
                 children: [
                   CircleAvatar(
@@ -180,6 +190,8 @@ class ProviderCard extends StatelessWidget {
                       children: [
                         Text(
                           provider.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 16,
@@ -189,11 +201,15 @@ class ProviderCard extends StatelessWidget {
                         Row(
                           children: [
                             const Icon(Icons.star, size: 14, color: AppColors.accent),
-                            Text(
-                              ' ${provider.rating.toStringAsFixed(1)} (${provider.ratingCount}) · ${provider.jobsCompleted} jobs',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppColors.secondaryText,
+                            Flexible(
+                              child: Text(
+                                ' ${provider.rating.toStringAsFixed(1)} (${provider.ratingCount}) · ${provider.jobsCompleted} jobs',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: secondary,
+                                ),
                               ),
                             ),
                           ],
@@ -201,7 +217,6 @@ class ProviderCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  TierBadge(tier: provider.tier),
                   if (isFavorite != null)
                     IconButton(
                       icon: Icon(
@@ -214,22 +229,25 @@ class ProviderCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 12),
-              Row(
+              // Badge + meta wrap onto their own line instead of
+              // squeezing the name.
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  _meta(Icons.location_on, '${provider.distanceKm.toStringAsFixed(1)} km'),
-                  const SizedBox(width: 12),
-                  _meta(Icons.access_time, '~${provider.etaMinutes} min'),
-                  const SizedBox(width: 12),
+                  TierBadge(tier: provider.tier),
+                  _meta(Icons.location_on, '${provider.distanceKm.toStringAsFixed(1)} km', secondary: secondary),
+                  _meta(Icons.access_time, '~${provider.etaMinutes} min', secondary: secondary),
                   _meta(
                     Icons.circle,
                     provider.isOpen ? 'Open now' : 'Closed',
                     color: provider.isOpen ? AppColors.success : AppColors.danger,
                   ),
-                  const Spacer(),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: AppColors.fill,
+                      color: scheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
@@ -244,16 +262,20 @@ class ProviderCard extends StatelessWidget {
                 children: [
                   Text(
                     'From ${Money.pkr(provider.startingPrice)}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w700,
-                      color: AppColors.primaryDark,
+                      color: scheme.primary,
                     ),
                   ),
-                  Text(
-                    ' · replies in ~${provider.responseSecondsAvg}s',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.secondaryText,
+                  Flexible(
+                    child: Text(
+                      ' · replies in ~${provider.responseSecondsAvg}s',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: secondary,
+                      ),
                     ),
                   ),
                   const Spacer(),
@@ -273,12 +295,12 @@ class ProviderCard extends StatelessWidget {
     );
   }
 
-  Widget _meta(IconData icon, String text, {Color? color}) => Row(
+  Widget _meta(IconData icon, String text, {Color? color, Color? secondary}) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color ?? AppColors.secondaryText),
+          Icon(icon, size: 14, color: color ?? secondary ?? AppColors.secondaryText),
           const SizedBox(width: 4),
-          Text(text, style: TextStyle(fontSize: 12, color: color)),
+          Text(text, style: TextStyle(fontSize: 12, color: color ?? secondary)),
         ],
       );
 }

@@ -5,7 +5,7 @@
 // that match the selected service category — e.g. stationery / book shops
 // for Book Binding. These are NOT registered Near Service providers; they
 // are public map data, shown on the customer map as a separate pin colour
-// with a Directions button (Google Maps intent, also free, no key).
+// with an in-app route (OSRM, also free, no key).
 //
 // Two Overpass quirks, both verified live from this VM (2026-11-18):
 //   * The server returns HTTP 406 unless the request carries a User-Agent
@@ -13,18 +13,24 @@
 //   * The query must be POSTed as form data (data=<Overpass QL>).
 // Coverage note: Overpass only returns what volunteers mapped. In Quetta
 // centre (30.18, 66.975) a 20 km stationery/books query returns 5 real
-// shops; sparse areas may legitimately return none — that is an empty
-// answer, not an error, and is reported as degraded: true so the app can
-// say "no shops found" instead of failing.
+// shops; tailoring returns 1 (QTH, Sirki Road) and car repair 3 — most
+// local tailors simply are not on the map yet. A successful query that
+// finds nothing is an EMPTY answer, not an error: it is reported as
+// `empty: true` (degraded stays false) so the app can say so honestly
+// instead of "lookup unavailable".
 //
 // Failure policy: this endpoint NEVER returns 500 for an upstream problem.
-// Overpass error / timeout / empty result -> HTTP 200
-// {items: [], source: 'openstreetmap', degraded: true}. The registered-
-// provider nearby search is unaffected (separate endpoint).
+// Overpass error / timeout -> HTTP 200
+// {items: [], source: 'openstreetmap', degraded: true, empty: false}.
+// Overpass answered fine but found nothing -> HTTP 200
+// {items: [], source: 'openstreetmap', degraded: false, empty: true}.
+// The registered-provider nearby search is unaffected (separate endpoint).
 //
-// Cache: results are cached in Redis for 15 minutes per
-// (category, ~100 m cell, radius). A Redis failure never fails the
-// request — cache read/write errors are logged and the live fetch runs.
+// Cache: non-degraded results are cached in Redis for 15 minutes per
+// (category, ~100 m cell, radius) — an empty answer is a real answer and
+// is cached too; a degraded answer is never cached (a transient outage
+// must not hide real shops for 15 minutes). A Redis failure never fails
+// the request — cache read/write errors are logged and the live fetch runs.
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisService } from '../../database/redis.service';
 import { Errors } from '../../common/errors/api-error';
@@ -35,21 +41,32 @@ export const OVERPASS_TIMEOUT_MS = 50000;
 export const PLACES_CACHE_TTL_SECONDS = 900; // 15 minutes
 export const PLACES_MAX_ITEMS = 50;
 
-/** The 5 launch categories (PRD p.2, slugs match the backend seed). */
-export const LAUNCH_CATEGORY_SLUGS = [
+/** All 13 level-1 categories (PRD p.2 taxonomy, slugs match the backend
+ *  seed). Every category the app shows is mapped to OSM tags. */
+export const MAPPED_CATEGORY_SLUGS = [
   'book-binding',
   'ac-repair',
   'electrician',
   'plumber',
   'mobile-repair',
+  'tailoring',
+  'carpentry',
+  'painting',
+  'cleaning',
+  'tutoring',
+  'printing',
+  'car-mechanic',
+  'appliance-repair',
 ] as const;
-export type LaunchCategorySlug = (typeof LAUNCH_CATEGORY_SLUGS)[number];
+export type MappedCategorySlug = (typeof MAPPED_CATEGORY_SLUGS)[number];
 
 /** Category slug -> OpenStreetMap tag selectors. A shop matches a category
  *  when ANY selector matches. Selectors are deliberately close to the
  *  service: a stationery shop sells books and binds them; an electronics-
- *  repair craft fixes ACs and phones. */
-export const CATEGORY_OSM_TAGS: Record<LaunchCategorySlug, Array<{ key: string; value: string }>> = {
+ *  repair craft fixes ACs and phones.
+ *  Tutoring has no dedicated OSM tag — schools / educational institutions
+ *  are the closest mappable equivalent and are documented as such. */
+export const CATEGORY_OSM_TAGS: Record<MappedCategorySlug, Array<{ key: string; value: string }>> = {
   'book-binding': [
     { key: 'shop', value: 'stationery' },
     { key: 'shop', value: 'books' },
@@ -72,6 +89,37 @@ export const CATEGORY_OSM_TAGS: Record<LaunchCategorySlug, Array<{ key: string; 
     { key: 'shop', value: 'mobile_phone' },
     { key: 'craft', value: 'electronics_repair' },
   ],
+  tailoring: [
+    { key: 'shop', value: 'tailor' },
+    { key: 'craft', value: 'tailor' },
+  ],
+  carpentry: [{ key: 'craft', value: 'carpenter' }],
+  painting: [
+    { key: 'craft', value: 'painter' },
+    { key: 'shop', value: 'paint' },
+  ],
+  cleaning: [
+    { key: 'shop', value: 'cleaning' },
+    { key: 'craft', value: 'cleaner' },
+  ],
+  tutoring: [
+    // No dedicated OSM tag for tutors — closest mappable equivalents.
+    { key: 'office', value: 'educational_institution' },
+    { key: 'amenity', value: 'school' },
+    { key: 'amenity', value: 'language_school' },
+  ],
+  printing: [
+    { key: 'shop', value: 'copyshop' },
+    { key: 'craft', value: 'printer' },
+  ],
+  'car-mechanic': [
+    { key: 'shop', value: 'car_repair' },
+    { key: 'craft', value: 'car_mechanic' },
+  ],
+  'appliance-repair': [
+    { key: 'shop', value: 'appliances' },
+    { key: 'craft', value: 'electronics_repair' },
+  ],
 };
 
 export interface PlaceShop {
@@ -86,7 +134,12 @@ export interface PlaceShop {
 export interface PlacesResponse {
   items: PlaceShop[];
   source: 'openstreetmap';
+  /** True only when Overpass errored / timed out — the lookup itself
+   *  failed, so the app says the lookup is unavailable. */
   degraded: boolean;
+  /** True only when Overpass answered fine but found nothing mapped for
+   *  this category nearby — a real empty answer, not an error. */
+  empty: boolean;
 }
 
 interface OverpassElement {
@@ -185,8 +238,10 @@ export class PlacesService {
       this.logger.warn(`places cache read failed, continuing live: ${(e as Error).message}`);
     }
     const live = await this.fetchLive(q.lat, q.lng, tags, radiusKm);
-    // Cache only real results: a degraded (empty) answer must never hide
-    // real shops for 15 minutes after a transient Overpass outage.
+    // Cache every non-degraded result: an empty answer is a real answer
+    // (Overpass said "nothing mapped here"), so it is cached too. A
+    // degraded answer is never cached — a transient outage must not hide
+    // real shops for 15 minutes.
     if (!live.degraded) {
       try {
         await this.redis.set(key, JSON.stringify(live), PLACES_CACHE_TTL_SECONDS);
@@ -203,7 +258,12 @@ export class PlacesService {
     tags: Array<{ key: string; value: string }>,
     radiusKm: number,
   ): Promise<PlacesResponse> {
-    const degraded: PlacesResponse = { items: [], source: 'openstreetmap', degraded: true };
+    const degraded: PlacesResponse = {
+      items: [],
+      source: 'openstreetmap',
+      degraded: true,
+      empty: false,
+    };
     const query = buildOverpassQuery(tags, lat, lng, Math.round(radiusKm * 1000));
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), OVERPASS_TIMEOUT_MS);
@@ -224,8 +284,12 @@ export class PlacesService {
       }
       const body = (await res.json()) as { elements?: OverpassElement[] };
       const items = parseOverpassElements(body.elements ?? [], lat, lng);
-      if (items.length === 0) return degraded;
-      return { items, source: 'openstreetmap', degraded: false };
+      // Empty is a real answer, not a failure: Overpass responded fine,
+      // nothing is mapped for this category nearby.
+      if (items.length === 0) {
+        return { items: [], source: 'openstreetmap', degraded: false, empty: true };
+      }
+      return { items, source: 'openstreetmap', degraded: false, empty: false };
     } catch (e) {
       this.logger.warn(`overpass fetch failed: ${(e as Error).message}`);
       return degraded;

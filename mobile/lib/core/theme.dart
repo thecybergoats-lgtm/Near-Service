@@ -109,6 +109,13 @@ ThemeData buildTheme({bool isUrdu = false}) {
         side: const BorderSide(color: AppColors.border),
       ),
     ),
+    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      backgroundColor: AppColors.surface,
+      selectedItemColor: AppColors.primary,
+      // Unselected icons must stay clearly visible on white — the default
+      // M3 derivation was too dim in light mode (Batch 4 bug report).
+      unselectedItemColor: AppColors.secondaryText,
+    ),
     bottomSheetTheme: const BottomSheetThemeData(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
@@ -206,7 +213,8 @@ ThemeData buildDarkTheme({bool isUrdu = false}) {
     bottomNavigationBarTheme: const BottomNavigationBarThemeData(
       backgroundColor: AppColors.darkSurface,
       selectedItemColor: Color(0xFF2DD4BF),
-      unselectedItemColor: AppColors.darkSecondaryText,
+      // Light grey on near-black — clearly visible, not washed out.
+      unselectedItemColor: Color(0xFFD1D5DB),
     ),
     bottomSheetTheme: const BottomSheetThemeData(
       backgroundColor: AppColors.darkCard,

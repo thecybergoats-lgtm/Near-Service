@@ -475,6 +475,28 @@ class L {
       'ur': 'آج ختم ہو رہی ہے',
       'ur-roman': 'Aaj khatam ho rahi hai',
     },
+    // Batch 4 — three real-shop states (found / empty / degraded).
+    'places_empty_mapped': {
+      'en': 'No shops for this service are mapped on OpenStreetMap yet — showing app providers.',
+      'ur': 'اوپن اسٹریٹ میپ پر اس سروس کی کوئی دکان درج نہیں ہے — ایپ کے کاریگر دکھائے جا رہے ہیں۔',
+      'ur-roman': 'OSM mein is category ki koi dukaan mapped nahi hai — app providers dikhaye ja rahe hain.',
+    },
+    'places_degraded': {
+      'en': 'Real-shop lookup is unavailable right now — showing app providers.',
+      'ur': 'اصل دکانوں کی تلاش ابھی دستیاب نہیں ہے — ایپ کے کاریگر دکھائے جا رہے ہیں۔',
+      'ur-roman': 'Real-shop lookup abhi available nahi hai — app providers dikhaye ja rahe hain.',
+    },
+    // Batch 4 — in-app OSRM routing.
+    'route_failed': {
+      'en': 'Could not find a route to this shop.',
+      'ur': 'اس دکان تک راستہ نہیں مل سکا۔',
+      'ur-roman': 'Is dukaan tak route nahi mil saka.',
+    },
+    'clear_route': {
+      'en': 'Clear route',
+      'ur': 'راستہ ہٹائیں',
+      'ur-roman': 'Route hatayein',
+    },
     'scan_qr_code': {
       'en': 'Scan a provider QR code',
       'ur': 'کاریگر کا کیو آر کوڈ اسکین کریں',

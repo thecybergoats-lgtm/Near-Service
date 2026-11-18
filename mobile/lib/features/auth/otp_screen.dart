@@ -7,12 +7,16 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api_client.dart';
 import '../../core/errors.dart';
+import '../../core/theme.dart';
 
 /// OTP entry (POST /auth/otp/verify).
 /// Batch 2 redesign: premium dark + gold, step 2 of 3, 6-digit entry,
 /// 30 s resend timer, proper error states (wrong code, expired,
 /// locked / too many attempts, no network). No code is ever shown in
 /// the UI — the code arrives by SMS only.
+/// Batch 4: follows the app theme exactly (light/dark) — no hardcoded
+/// dark background or white text; the gold accent is the theme token
+/// [AppColors.gold].
 class OtpScreen extends ConsumerStatefulWidget {
   const OtpScreen({super.key, required this.phone});
 
@@ -29,9 +33,6 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   int _resendIn = 30;
   Timer? _resendTimer;
   bool _resending = false;
-
-  static const _gold = Color(0xFFC9A227);
-  static const _bg = Color(0xFF0E0E0E);
 
   @override
   void initState() {
@@ -118,8 +119,9 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fill = Theme.of(context).inputDecorationTheme.fillColor;
     return Scaffold(
-      backgroundColor: _bg,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -137,28 +139,28 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
                 ],
               ),
               const SizedBox(height: 8),
-              const Row(
+              Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Phone', style: TextStyle(color: _gold, fontSize: 12, fontWeight: FontWeight.w700)),
-                  Text('OTP', style: TextStyle(color: _gold, fontSize: 12, fontWeight: FontWeight.w700)),
-                  Text('Done', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  const Text('Phone', style: TextStyle(color: AppColors.gold, fontSize: 12, fontWeight: FontWeight.w700)),
+                  const Text('OTP', style: TextStyle(color: AppColors.gold, fontSize: 12, fontWeight: FontWeight.w700)),
+                  Text('Done', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12)),
                 ],
               ),
               const SizedBox(height: 32),
-              const Text('Verify your number',
+              Text('Verify your number',
                   style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w800,
-                      color: Colors.white)),
+                      color: scheme.onSurface)),
               const SizedBox(height: 8),
               Text('Code sent to ${widget.phone}',
-                  style: const TextStyle(color: Colors.grey, fontSize: 15)),
+                  style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 15)),
               const SizedBox(height: 8),
               TextButton(
                 onPressed: () => context.go('/auth/phone'),
                 child: const Text('Wrong number? Change it',
-                    style: TextStyle(color: _gold)),
+                    style: TextStyle(color: AppColors.gold)),
               ),
               const SizedBox(height: 24),
               TextField(
@@ -167,19 +169,19 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
                 maxLength: 6,
                 autofocus: true,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                style: const TextStyle(
-                    color: Colors.white,
+                style: TextStyle(
+                    color: scheme.onSurface,
                     fontSize: 24,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 8),
                 textAlign: TextAlign.center,
                 decoration: InputDecoration(
                   filled: true,
-                  fillColor: const Color(0xFF1F2937),
+                  fillColor: fill,
                   hintText: '••••••',
-                  hintStyle: const TextStyle(color: Colors.grey),
+                  hintStyle: TextStyle(color: scheme.onSurfaceVariant),
                   counterText: '',
-                  prefixIcon: const Icon(Icons.lock_outline, color: _gold),
+                  prefixIcon: const Icon(Icons.lock_outline, color: AppColors.gold),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(16),
                     borderSide: BorderSide.none,
@@ -193,16 +195,16 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
                 },
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'Enter the 6-digit code from the SMS. It expires in a few minutes.',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),
               const Spacer(),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _gold,
+                    backgroundColor: AppColors.gold,
                     foregroundColor: Colors.black,
                     minimumSize: const Size.fromHeight(52),
                     shape: RoundedRectangleBorder(
@@ -226,13 +228,13 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
                 child: _resendIn > 0
                     ? Text('Resend code in ${_resendIn}s',
                         style:
-                            const TextStyle(color: Colors.grey, fontSize: 14))
+                            TextStyle(color: scheme.onSurfaceVariant, fontSize: 14))
                     : TextButton(
                         onPressed: _resending ? null : _resend,
                         child: Text(
                           _resending ? 'Sending…' : 'Resend code',
                           style: const TextStyle(
-                              color: _gold, fontWeight: FontWeight.w700),
+                              color: AppColors.gold, fontWeight: FontWeight.w700),
                         ),
                       ),
               ),
@@ -244,33 +246,34 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   }
 
   Widget _stepDot(int n, {bool active = false, bool done = false}) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       width: 32,
       height: 32,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: done
-            ? _gold
-            : active
-                ? _gold
-                : const Color(0xFF1F2937),
-        border: Border.all(color: done || active ? _gold : Colors.grey),
+        color: done || active
+            ? AppColors.gold
+            : scheme.surfaceContainerHighest,
+        border: Border.all(
+            color: done || active ? AppColors.gold : scheme.outlineVariant),
       ),
       child: done
           ? const Icon(Icons.check, size: 18, color: Colors.black)
           : Text('$n',
               style: TextStyle(
-                  color: active ? Colors.black : Colors.grey,
+                  color: active ? Colors.black : scheme.onSurfaceVariant,
                   fontWeight: FontWeight.w700)),
     );
   }
 
   Widget _stepLine({required bool done}) {
+    final scheme = Theme.of(context).colorScheme;
     return Expanded(
       child: Container(
         height: 2,
-        color: done ? _gold : const Color(0xFF374151),
+        color: done ? AppColors.gold : scheme.outlineVariant,
         margin: const EdgeInsets.symmetric(horizontal: 4),
       ),
     );

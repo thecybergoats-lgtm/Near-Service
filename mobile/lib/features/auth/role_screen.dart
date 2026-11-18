@@ -64,7 +64,7 @@ class RoleScreen extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-                    Text(subtitle, style: const TextStyle(color: Colors.grey)),
+                    Text(subtitle, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                   ],
                 ),
               ),

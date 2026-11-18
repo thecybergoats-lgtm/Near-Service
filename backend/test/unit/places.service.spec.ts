@@ -45,17 +45,35 @@ function makeService() {
 }
 
 describe('places mapping (pure helpers)', () => {
-  it('maps every launch category to OSM tags', () => {
+  it('maps every level-1 category to OSM tags', () => {
     expect(Object.keys(CATEGORY_OSM_TAGS).sort()).toEqual([
       'ac-repair',
+      'appliance-repair',
       'book-binding',
+      'car-mechanic',
+      'carpentry',
+      'cleaning',
       'electrician',
       'mobile-repair',
+      'painting',
       'plumber',
+      'printing',
+      'tailoring',
+      'tutoring',
     ]);
     expect(CATEGORY_OSM_TAGS['book-binding']).toContainEqual({ key: 'shop', value: 'stationery' });
     expect(CATEGORY_OSM_TAGS['book-binding']).toContainEqual({ key: 'craft', value: 'bookbinder' });
     expect(CATEGORY_OSM_TAGS['plumber']).toContainEqual({ key: 'craft', value: 'plumber' });
+    expect(CATEGORY_OSM_TAGS['tailoring']).toContainEqual({ key: 'shop', value: 'tailor' });
+    expect(CATEGORY_OSM_TAGS['car-mechanic']).toContainEqual({ key: 'shop', value: 'car_repair' });
+    expect(CATEGORY_OSM_TAGS['carpentry']).toContainEqual({ key: 'craft', value: 'carpenter' });
+    expect(CATEGORY_OSM_TAGS['painting']).toContainEqual({ key: 'craft', value: 'painter' });
+    expect(CATEGORY_OSM_TAGS['cleaning']).toContainEqual({ key: 'shop', value: 'cleaning' });
+    expect(CATEGORY_OSM_TAGS['printing']).toContainEqual({ key: 'shop', value: 'copyshop' });
+    expect(CATEGORY_OSM_TAGS['appliance-repair']).toContainEqual({ key: 'shop', value: 'appliances' });
+    // Tutoring has no dedicated OSM tag — schools / institutions only.
+    expect(CATEGORY_OSM_TAGS['tutoring']).toContainEqual({ key: 'office', value: 'educational_institution' });
+    expect(CATEGORY_OSM_TAGS['tutoring']).toContainEqual({ key: 'amenity', value: 'school' });
   });
 
   it('builds an Overpass query with the required selectors', () => {
@@ -63,6 +81,17 @@ describe('places mapping (pure helpers)', () => {
     expect(q).toContain('[out:json][timeout:50]');
     expect(q).toContain('node["shop"="stationery"](around:20000,30.18,66.975)');
     expect(q).toContain('node["craft"="bookbinder"](around:20000,30.18,66.975)');
+  });
+
+  it('builds Overpass queries for the new categories (incl. non-shop keys)', () => {
+    const tailor = buildOverpassQuery(CATEGORY_OSM_TAGS['tailoring'], 30.18, 66.975, 20000);
+    expect(tailor).toContain('node["shop"="tailor"](around:20000,30.18,66.975)');
+    expect(tailor).toContain('node["craft"="tailor"](around:20000,30.18,66.975)');
+    const car = buildOverpassQuery(CATEGORY_OSM_TAGS['car-mechanic'], 30.18, 66.975, 20000);
+    expect(car).toContain('node["shop"="car_repair"](around:20000,30.18,66.975)');
+    const tutor = buildOverpassQuery(CATEGORY_OSM_TAGS['tutoring'], 30.18, 66.975, 20000);
+    expect(tutor).toContain('node["office"="educational_institution"](around:20000,30.18,66.975)');
+    expect(tutor).toContain('node["amenity"="school"](around:20000,30.18,66.975)');
   });
 
   it('haversine: Quetta centre to Honar stationary is under 1 km', () => {
@@ -118,6 +147,7 @@ describe('places service (mocked Overpass + stub Redis)', () => {
     svc.fetchImpl = fetchMock as unknown as typeof fetch;
     const res = await svc.nearby({ lat: 30.18, lng: 66.975, category_slug: 'book-binding' });
     expect(res.degraded).toBe(false);
+    expect(res.empty).toBe(false);
     expect(res.items).toHaveLength(5);
     expect(res.items[0].name).toBe('Azhari stationary');
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -149,24 +179,32 @@ describe('places service (mocked Overpass + stub Redis)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('degrades (200-shaped) on empty Overpass result', async () => {
-    const { svc } = makeService();
-    svc.fetchImpl = jest.fn(async () => okResponse({ elements: [] })) as unknown as typeof fetch;
-    const res = await svc.nearby({ lat: 30.18, lng: 66.975, category_slug: 'plumber' });
-    expect(res).toEqual({ items: [], source: 'openstreetmap', degraded: true });
-  });
-
-  it('does NOT cache a degraded result — the next call refetches live', async () => {
+  it('empty Overpass result is a real empty answer, not degraded — and it IS cached', async () => {
     const { svc } = makeService();
     const fetchMock = jest.fn(async () => okResponse({ elements: [] }));
     svc.fetchImpl = fetchMock as unknown as typeof fetch;
     const q = { lat: 30.18, lng: 66.975, category_slug: 'plumber' };
     const first = await svc.nearby(q);
     const second = await svc.nearby(q);
+    // Batch 4: empty means "Overpass answered fine, nothing mapped here".
+    // It is a real answer, so it is cached like any other result.
+    expect(first).toEqual({ items: [], source: 'openstreetmap', degraded: false, empty: true });
+    expect(second).toEqual(first);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT cache a degraded result — the next call refetches live', async () => {
+    const { svc } = makeService();
+    const fetchMock = jest.fn(async () => ({ ok: false, status: 502, json: async () => ({}) }));
+    svc.fetchImpl = fetchMock as unknown as typeof fetch;
+    const q = { lat: 30.18, lng: 66.975, category_slug: 'plumber' };
+    const first = await svc.nearby(q);
+    const second = await svc.nearby(q);
     expect(first.degraded).toBe(true);
+    expect(first.empty).toBe(false);
     expect(second.degraded).toBe(true);
-    // A cached empty answer would hide real shops for 15 minutes after a
-    // transient Overpass outage, so degraded responses are never stored.
+    // A degraded answer is never stored: a transient Overpass outage
+    // must not hide real shops for 15 minutes.
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -184,7 +222,7 @@ describe('places service (mocked Overpass + stub Redis)', () => {
       throw new Error('network down');
     }) as unknown as typeof fetch;
     const res = await svc.nearby({ lat: 30.18, lng: 66.975, category_slug: 'ac-repair' });
-    expect(res).toEqual({ items: [], source: 'openstreetmap', degraded: true });
+    expect(res).toEqual({ items: [], source: 'openstreetmap', degraded: true, empty: false });
   });
 
   it('times out after 25s and degrades', async () => {
@@ -207,7 +245,7 @@ describe('places service (mocked Overpass + stub Redis)', () => {
       // was taking ~28–37 s, so the old timeout aborted live queries).
       await jest.advanceTimersByTimeAsync(50000);
       const res = await p;
-      expect(res).toEqual({ items: [], source: 'openstreetmap', degraded: true });
+      expect(res).toEqual({ items: [], source: 'openstreetmap', degraded: true, empty: false });
     } finally {
       jest.useRealTimers();
     }

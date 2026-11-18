@@ -4,7 +4,7 @@
 openapi: 3.1.0
 info:
   title: Near Service API
-  version: 1.9.0
+  version: 1.10.0
   description: 'OpenAPI 3.1 skeleton for the Near Service Phase 1 (MVP) endpoints. Companion to the Phase 0 PRD v1.1. Phase 2 endpoints (wallet, payment intents, payouts, escrow) are intentionally excluded
     and will extend this file. Identifier rule (v1.1): category_id is always a UUID (format: uuid). A client may instead send category_slug; the API resolves the slug to its UUID and echoes the canonical
     UUID in every response.
@@ -1568,6 +1568,7 @@ components:
       - items
       - source
       - degraded
+      - empty
       properties:
         items:
           type: array
@@ -1579,7 +1580,10 @@ components:
           - openstreetmap
         degraded:
           type: boolean
-          description: True when Overpass errored, timed out or returned nothing — items is then [].
+          description: True only when Overpass errored or timed out — the lookup itself failed, items is then [].
+        empty:
+          type: boolean
+          description: True only when Overpass answered fine but nothing is mapped for this category nearby — a real empty answer, not an error.
     ReviewPage:
       allOf:
       - $ref: '#/components/schemas/Page'
@@ -5460,7 +5464,7 @@ paths:
       - Discovery
       operationId: nearbyPlaces
       summary: Real-world shops near the user, from OpenStreetMap (free, no key)
-      description: 'Proxies the Overpass API for the 5 launch categories. These are public map shops, NOT registered Near Service providers — the app shows them as a separate pin colour with a Directions button. The endpoint never returns 500 for an upstream problem: an Overpass error, timeout or empty result answers 200 with items [] and degraded true.'
+      description: 'Proxies the Overpass API for all 13 level-1 categories. These are public map shops, NOT registered Near Service providers — the app shows them as a separate pin colour with an in-app route. The endpoint never returns 500 for an upstream problem: an Overpass error or timeout answers 200 with items [] and degraded true; an Overpass answer with nothing mapped answers 200 with items [] and empty true.'
       parameters:
       - name: lat
         in: query

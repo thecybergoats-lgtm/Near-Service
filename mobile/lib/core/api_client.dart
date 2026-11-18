@@ -368,11 +368,12 @@ class ApiClient implements PartnerApi {
   }
 
   /// GET /places/nearby — real-world shops from OpenStreetMap (free, no
-  /// key). Returns the shops plus `degraded` (true when Overpass errored,
-  /// timed out or found nothing — the list is then empty and the caller
-  /// keeps showing registered providers). A non-200 here is a real client
-  /// error (e.g. unknown category slug -> 422) and still throws.
-  Future<({List<PlaceShop> shops, bool degraded})> getNearbyPlaces({
+  /// key). Returns the shops plus `degraded` (true when Overpass errored
+  /// or timed out) and `empty` (true when Overpass answered fine but
+  /// nothing is mapped for this category nearby — a real empty answer,
+  /// not an error). A non-200 here is a real client error (e.g. unknown
+  /// category slug -> 422) and still throws.
+  Future<({List<PlaceShop> shops, bool degraded, bool empty})> getNearbyPlaces({
     required double lat,
     required double lng,
     required String categorySlug,
@@ -390,7 +391,11 @@ class ApiClient implements PartnerApi {
     final items = (body['items'] as List? ?? [])
         .map((e) => PlaceShop.fromJson(e as Map<String, dynamic>))
         .toList();
-    return (shops: items, degraded: body['degraded'] == true);
+    return (
+      shops: items,
+      degraded: body['degraded'] == true,
+      empty: body['empty'] == true,
+    );
   }
 
   Future<void> setOnline(bool online, double lat, double lng) async {
